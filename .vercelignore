@@ -1,9 +1,11 @@
 # Not part of the website — keep them out of Vercel deployments.
+# Leading "/" = only these top-level folders (a bare "iot/" would also drop
+# src/app/api/iot — the board's API).
 # The Python AI service (TensorFlow, ~2 GB) runs locally or on Hugging Face;
 # on the live site Disease AI uses Gemini / Groq (Settings → Disease AI).
-services/
+/services/
 # ESP32 firmware and its local config
-iot/
+/iot/
 # local-only files
-.data/
-simulator.js
+/.data/
+/simulator.js

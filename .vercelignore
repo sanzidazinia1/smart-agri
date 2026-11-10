@@ -1,0 +1,9 @@
+# Not part of the website — keep them out of Vercel deployments.
+# The Python AI service (TensorFlow, ~2 GB) runs locally or on Hugging Face;
+# on the live site Disease AI uses Gemini / Groq (Settings → Disease AI).
+services/
+# ESP32 firmware and its local config
+iot/
+# local-only files
+.data/
+simulator.js

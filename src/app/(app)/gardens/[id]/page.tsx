@@ -291,7 +291,6 @@ function GardenDetails() {
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="truncate text-2xl font-black">{garden.name}</h1>
-              <ActivePill active={active} />
             </div>
             <dl className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-500 dark:text-slate-400">
               <Meta icon={MapPin} label="Location" value={`${garden.location || "No location"} · ${type.label} garden`} />
@@ -865,12 +864,12 @@ function ActionsMenu({
               className={`${itemClass} cursor-default text-emerald-600 hover:bg-transparent dark:text-emerald-400 dark:hover:bg-transparent`}
             >
               <CircleCheck size={16} />
-              Active garden
+              Shown on dashboard
             </div>
           ) : (
             <button role="menuitem" type="button" onClick={() => run(onActivate)} className={itemClass}>
               <CircleCheck size={16} className="text-slate-400" />
-              Set as active
+              Show on dashboard
             </button>
           )}
           <button role="menuitem" type="button" onClick={() => run(onEdit)} className={itemClass}>
@@ -1823,20 +1822,6 @@ function DeviceCard({
         </Link>
       </div>
     </article>
-  );
-}
-
-function ActivePill({ active }: { active: boolean }) {
-  return active ? (
-    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-bold text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">
-      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-      Active
-    </span>
-  ) : (
-    <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-bold text-slate-500 dark:bg-slate-800 dark:text-slate-400">
-      <span className="h-1.5 w-1.5 rounded-full bg-slate-400 dark:bg-slate-500" />
-      Inactive
-    </span>
   );
 }
 

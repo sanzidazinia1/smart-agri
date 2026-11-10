@@ -618,9 +618,7 @@ function GardenCard({
       className={`group/card relative flex flex-col rounded-2xl border bg-white shadow-sm transition hover:shadow-md dark:bg-slate-900 ${
         critical
           ? "border-rose-400/70 ring-1 ring-rose-500/25 dark:border-rose-500/50"
-          : active
-            ? "border-emerald-500/60 ring-1 ring-emerald-500/30 dark:border-emerald-500/50"
-            : "border-slate-200 hover:border-slate-300 dark:border-slate-800 dark:hover:border-slate-700"
+          : "border-slate-200 hover:border-slate-300 dark:border-slate-800 dark:hover:border-slate-700"
       }`}
     >
       <div className="flex items-start gap-3.5 p-5">
@@ -636,17 +634,6 @@ function GardenCard({
             >
               {garden.name}
             </Link>
-            {active ? (
-              <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                Active
-              </span>
-            ) : (
-              <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-500 dark:bg-slate-800 dark:text-slate-400">
-                <span className="h-1.5 w-1.5 rounded-full bg-slate-400 dark:bg-slate-500" />
-                Inactive
-              </span>
-            )}
           </div>
           <p className="mt-1 flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400">
             <MapPin size={12} className="shrink-0" />
@@ -826,12 +813,12 @@ function GardenMenu({
           {active ? (
             <div role="menuitem" aria-disabled="true" className={`${itemClass} cursor-default text-emerald-600 hover:bg-transparent dark:text-emerald-400 dark:hover:bg-transparent`}>
               <CircleCheck size={16} />
-              Active garden
+              Shown on dashboard
             </div>
           ) : (
             <button role="menuitem" type="button" onClick={() => run(onActivate)} className={itemClass}>
               <CircleCheck size={16} className="text-slate-400" />
-              Set as active
+              Show on dashboard
             </button>
           )}
           <div className="my-1 border-t border-slate-100 dark:border-slate-800" />

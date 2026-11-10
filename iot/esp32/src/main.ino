@@ -6,7 +6,7 @@
  *     network "SmartAgri-Setup". Connect from a phone, pick your Wi-Fi and
  *     enter the SmartAgri server address (e.g. http://192.168.1.10:3000).
  *  2. It announces itself to the server; its blue LED blinks slowly.
- *  3. In the app: Sensors -> Add device (or "New devices found") -> choose the
+ *  3. In the app: Devices -> Add device (or "New devices found") -> choose the
  *     pot. The LED then flashes fast: press BOOT once to confirm. The board
  *     receives its device key automatically. (Typing the 6-digit pairing
  *     code shown on the setup page / Serial Monitor works too; the code stays
@@ -79,7 +79,7 @@
 #define COMMUNICATION_LOSS_FAILSAFE_MS 60000UL
 #endif
 
-#define FIRMWARE_VERSION "smartagri-2.10"
+#define FIRMWARE_VERSION "smartagri-2.11"
 #define SETUP_AP_NAME "SmartAgri-Setup"
 
 // Ports: each pot this board serves gets a soil probe + a pump relay.
@@ -181,7 +181,7 @@ void printPairingHelp() {
   Serial.println("==============================================");
   Serial.printf(" Waiting to be claimed as %s\n", hardwareId.c_str());
   Serial.printf(" Pairing code: %s\n", formattedCode().c_str());
-  Serial.println(" In SmartAgri: Sensors -> Add device, then press BOOT");
+  Serial.println(" In SmartAgri: Devices -> Add device, then press BOOT");
   Serial.println("==============================================");
 }
 
@@ -716,6 +716,39 @@ bool bootHeldFor(unsigned long ms) {
   return false;
 }
 
+// Wi-Fi drops now and then (router restart, weak signal). Retry every 15 s —
+// calling reconnect on every loop interrupts each attempt so it never finishes
+// ("connecting, return error"). If it stays down for 3 minutes, restart the
+// board (pumps off first): a fresh start reliably gets back online.
+const unsigned long WIFI_RETRY_MS = 15000;
+const unsigned long WIFI_RESTART_AFTER_MS = 180000;
+unsigned long wifiLostAt = 0;
+unsigned long lastWifiTryAt = 0;
+
+void keepWiFi(unsigned long now) {
+  if (WiFi.status() == WL_CONNECTED) {
+    if (wifiLostAt) Serial.printf("Wi-Fi back after %lu s\n", (now - wifiLostAt) / 1000);
+    wifiLostAt = 0;
+    return;
+  }
+  if (!wifiLostAt) {
+    wifiLostAt = now;
+    lastWifiTryAt = 0;
+    Serial.println("Wi-Fi lost - reconnecting...");
+  }
+  if (lastWifiTryAt == 0 || now - lastWifiTryAt >= WIFI_RETRY_MS) {
+    lastWifiTryAt = now;
+    WiFi.disconnect();
+    WiFi.begin();  // the saved network and password
+  }
+  if (now - wifiLostAt >= WIFI_RESTART_AFTER_MS) {
+    Serial.println("Wi-Fi down for 3 minutes - restarting the board");
+    allPumpsOff();
+    delay(200);
+    ESP.restart();
+  }
+}
+
 void setup() {
   // Preload the OFF level before enabling the pin so the pump never twitches on boot.
   // Coming out of sleep: release the relay pins that were held OFF.
@@ -768,7 +801,7 @@ void loop() {
     allPumpsOff();
     runWiFiSetup(true);
   }
-  if (WiFi.status() != WL_CONNECTED) WiFi.reconnect();
+  keepWiFi(now);
 
   // Safety: never leave a pump running without hearing from the server.
   if (anyPumpOn() && now - lastServerCommunicationAt >= COMMUNICATION_LOSS_FAILSAFE_MS) {

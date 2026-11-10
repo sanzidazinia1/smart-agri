@@ -13,6 +13,8 @@ import { errorMessage, useFeedback } from "@/components/Feedback";
 type Provider = "LOCAL" | "GEMINI" | "GROQ";
 interface AiSettingsView {
   provider: Provider;
+  /** The local model can run here (false on the live site without a hosted AI service). */
+  localAvailable?: boolean;
   fallbackToLocal: boolean;
   gemini: { key: string | null; model: string };
   groq: { key: string | null; model: string };
@@ -57,7 +59,9 @@ export function DiseaseAiCard() {
         {data ? (
           <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-            Using {OPTIONS.find((o) => o.value === data.provider)?.name}
+            {data.provider === "LOCAL" && data.localAvailable === false
+              ? "Not set up"
+              : `Using ${OPTIONS.find((o) => o.value === data.provider)?.name}`}
           </span>
         ) : null}
       </header>
@@ -74,7 +78,9 @@ export function DiseaseAiCard() {
 
 function Editor({ saved, onSaved }: { saved: AiSettingsView; onSaved: (next: AiSettingsView) => void }) {
   const { toast } = useFeedback();
-  const [provider, setProvider] = useState<Provider>(saved.provider);
+  const localOff = saved.localAvailable === false;
+  // Live site without the local model: start on an online AI.
+  const [provider, setProvider] = useState<Provider>(localOff && saved.provider === "LOCAL" ? "GEMINI" : saved.provider);
   const [keys, setKeys] = useState({ GEMINI: "", GROQ: "" });
   const [models, setModels] = useState({ GEMINI: saved.gemini.model, GROQ: saved.groq.model });
   const [fallback, setFallback] = useState(saved.fallbackToLocal);
@@ -150,18 +156,21 @@ function Editor({ saved, onSaved }: { saved: AiSettingsView; onSaved: (next: AiS
       <div role="radiogroup" aria-label="Disease AI engine" className="grid gap-2 sm:grid-cols-3">
         {OPTIONS.map((option) => {
           const checked = provider === option.value;
+          const unavailable = option.value === "LOCAL" && localOff;
           return (
             <button
               key={option.value}
               type="button"
               role="radio"
               aria-checked={checked}
+              disabled={unavailable}
+              title={unavailable ? "Not available on this site — the local AI service isn't hosted here" : undefined}
               onClick={() => {
                 setProvider(option.value);
                 setTested(null);
                 setShowKey(false);
               }}
-              className={`rounded-xl border p-3 text-left transition ${
+              className={`rounded-xl border p-3 text-left transition disabled:cursor-not-allowed disabled:opacity-50 ${
                 checked
                   ? "border-emerald-500 bg-emerald-50/60 ring-1 ring-emerald-500/40 dark:bg-emerald-500/10"
                   : "border-slate-200 hover:border-slate-300 dark:border-slate-800 dark:hover:border-slate-700"
@@ -171,7 +180,9 @@ function Editor({ saved, onSaved }: { saved: AiSettingsView; onSaved: (next: AiS
                 <span className="text-sm font-bold">{option.name}</span>
                 {checked ? <Check size={15} className="text-emerald-600 dark:text-emerald-400" /> : null}
               </span>
-              <span className="mt-0.5 block text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">{option.tag}</span>
+              <span className="mt-0.5 block text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
+                {unavailable ? "Not available on this site" : option.tag}
+              </span>
               <ul className="mt-1.5 space-y-0.5 text-[11px] text-slate-500 dark:text-slate-400">
                 {option.points.map((point) => (
                   <li key={point}>· {point}</li>
@@ -267,12 +278,14 @@ function Editor({ saved, onSaved }: { saved: AiSettingsView; onSaved: (next: AiS
               </button>
             ) : null}
           </div>
+          {localOff ? null : (
           <label className="flex items-start gap-2 text-sm">
             <input type="checkbox" checked={fallback} onChange={(e) => setFallback(e.target.checked)} className="mt-0.5 h-4 w-4 accent-emerald-600" />
             <span>
               If the online AI fails (no internet, free limit reached), use the local model instead
             </span>
           </label>
+          )}
           <p className="text-[11px] text-slate-400">
             Your leaf photo and the pot&apos;s plant name are sent to {online === "GEMINI" ? "Google" : "Groq"} for the diagnosis. The key is
             stored encrypted and never shown again.

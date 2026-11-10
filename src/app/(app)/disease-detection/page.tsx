@@ -45,7 +45,7 @@ interface HistoryPage {
   nextCursor: string | null;
   total?: number;
 }
-type AiStatus = { status: "ready" | "mock" | "offline"; labels?: number; engine?: string; engineName?: string; model?: string };
+type AiStatus = { status: "ready" | "mock" | "offline" | "unavailable"; labels?: number; engine?: string; engineName?: string; model?: string };
 
 // Phone photos can be large; they're shrunk in the browser before upload
 // (the model only looks at 224×224, and Vercel caps request bodies at 4.5 MB).
@@ -146,7 +146,7 @@ export default function DiseaseDetectionPage() {
     }
   }
 
-  const ready = Boolean(file && pot?.plant && ai?.status !== "offline");
+  const ready = Boolean(file && pot?.plant && ai?.status !== "offline" && ai?.status !== "unavailable");
 
   return (
     <div className="mx-auto max-w-7xl">
@@ -157,6 +157,7 @@ export default function DiseaseDetectionPage() {
       />
 
       {ai?.status === "offline" ? <StartAiBanner onRetry={() => recheckAi()} /> : null}
+      {ai?.status === "unavailable" ? <ChooseAiBanner /> : null}
 
       <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,24rem)_minmax(0,1fr)]">
         {/* New scan */}
@@ -249,7 +250,7 @@ export default function DiseaseDetectionPage() {
                 </p>
               ) : !ready && !loading ? (
                 <p className="mt-2 text-center text-xs text-slate-400">
-                  {ai?.status === "offline" ? "Start the AI service first (see above)." : !pot ? "Choose a pot first." : "Add a photo to continue."}
+                  {ai?.status === "offline" ? "Start the AI service first (see above)." : ai?.status === "unavailable" ? "Set up Disease AI in Settings first (see above)." : !pot ? "Choose a pot first." : "Add a photo to continue."}
                 </p>
               ) : null}
             </div>
@@ -445,6 +446,8 @@ function AiStatusChip({ ai }: { ai: AiStatus | undefined }) {
         ]
       : ai.status === "mock"
         ? ["AI in demo mode", "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300", "bg-amber-500"]
+        : ai.status === "unavailable"
+          ? ["Disease AI not set up", "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300", "bg-amber-500"]
         : ["AI service offline", "bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-300", "bg-rose-500"];
   return (
     <span className="inline-flex items-center gap-2">
@@ -459,6 +462,27 @@ function AiStatusChip({ ai }: { ai: AiStatus | undefined }) {
         Change
       </Link>
     </span>
+  );
+}
+
+/** Live site without a hosted AI service: Gemini or Groq does the diagnosis. */
+function ChooseAiBanner() {
+  return (
+    <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50/70 p-4 dark:border-amber-500/30 dark:bg-amber-500/10">
+      <p className="flex items-center gap-2 font-bold text-amber-800 dark:text-amber-200">
+        <TriangleAlert size={16} />
+        Set up Disease AI to diagnose leaves
+      </p>
+      <p className="mt-1 text-sm text-amber-800/80 dark:text-amber-200/80">
+        This site uses an online AI: add a free Google Gemini or Groq API key once — it takes about a minute and works for any plant.
+      </p>
+      <Link
+        href="/settings#disease-ai"
+        className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-700"
+      >
+        Open Settings → Disease AI
+      </Link>
+    </div>
   );
 }
 

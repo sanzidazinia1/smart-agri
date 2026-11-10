@@ -4,6 +4,15 @@
 // localhost to IPv6 (::1) while the FastAPI service binds IPv4, which surfaces
 // as "Disease detection service is unavailable".
 const AI_SERVICE_URL = (process.env.AI_SERVICE_URL || "http://127.0.0.1:8001").replace(/\/+$/, "");
+
+/**
+ * Is the local model (Python AI service) usable here? Locally it runs next to
+ * the app; on the live site (Vercel) only if AI_SERVICE_URL points to a hosted
+ * copy. Without it, Disease AI needs Gemini or Groq (Settings → Disease AI).
+ */
+export function localAiAvailable() {
+  return Boolean(process.env.AI_SERVICE_URL) || !process.env.VERCEL;
+}
 // Optional shared secret for a publicly hosted AI service (must match the
 // service's AI_SERVICE_TOKEN). /health stays public.
 const AI_SERVICE_TOKEN = process.env.AI_SERVICE_TOKEN;

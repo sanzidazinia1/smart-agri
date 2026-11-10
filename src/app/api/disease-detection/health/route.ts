@@ -2,7 +2,7 @@
 // (real model or demo) or an online AI chosen in Settings → Disease AI.
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/api-auth";
-import { aiServiceHealth } from "@/lib/ai";
+import { aiServiceHealth, localAiAvailable } from "@/lib/ai";
 import { getDiseaseEngine } from "@/lib/ai-settings";
 import { PROVIDER_INFO } from "@/lib/ai-vision";
 
@@ -19,6 +19,8 @@ export async function GET() {
       model: engine.model,
     });
   }
+  // Live site without a hosted AI service: only the online AIs can diagnose.
+  if (!localAiAvailable()) return NextResponse.json({ status: "unavailable" as const, engine: "local" });
   const health = await aiServiceHealth();
   if (!health) return NextResponse.json({ status: "offline" as const, engine: "local" });
   return NextResponse.json({

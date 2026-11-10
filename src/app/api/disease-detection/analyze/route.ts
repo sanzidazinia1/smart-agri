@@ -3,7 +3,7 @@
 import { NextResponse } from "next/server";
 import type { Severity } from "@prisma/client";
 import { requireUser } from "@/lib/api-auth";
-import { analyzeLeafImage, healthContributionFromPrediction, type AiPrediction } from "@/lib/ai";
+import { analyzeLeafImage, healthContributionFromPrediction, localAiAvailable, type AiPrediction } from "@/lib/ai";
 import { modelCropFor } from "@/lib/model-crops";
 import { getDiseaseEngine } from "@/lib/ai-settings";
 import { diagnoseOnline } from "@/lib/ai-vision";
@@ -63,6 +63,13 @@ export async function POST(req: Request) {
     const filename = file instanceof File && file.name ? file.name : "leaf.jpg";
     // The engine chosen in Settings → Disease AI: the local model, Gemini or Groq.
     const engine = await getDiseaseEngine(userId);
+    const localOk = localAiAvailable();
+    if (engine.provider === "LOCAL" && !localOk) {
+      return NextResponse.json(
+        { error: "Disease AI isn't set up on this site. Add a free Gemini or Groq key in Settings → Disease AI." },
+        { status: 503 },
+      );
+    }
     let prediction: AiPrediction & { summary?: string };
     let engineUsed = "local";
     let fallbackReason: string | null = null;
@@ -77,7 +84,8 @@ export async function POST(req: Request) {
           engineUsed = prediction.modelVersion;
         } catch (error) {
           const reason = error instanceof Error ? error.message : "The online AI failed.";
-          if (!engine.fallbackToLocal) return NextResponse.json({ error: reason }, { status: 502 });
+          // No local model to fall back to on the live site.
+          if (!engine.fallbackToLocal || !localOk) return NextResponse.json({ error: reason }, { status: 502 });
           console.warn("Online AI failed, using the local model:", reason);
           fallbackReason = reason;
           prediction = await runLocal();

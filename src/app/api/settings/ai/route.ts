@@ -5,6 +5,7 @@ import { z } from "zod";
 import { requireUser } from "@/lib/api-auth";
 import { prisma } from "@/lib/db";
 import { getAiSettingsView, sealKey } from "@/lib/ai-settings";
+import { localAiAvailable } from "@/lib/ai";
 
 const model = z.string().trim().max(100).regex(/^[\w./:-]*$/, "That model name has unexpected characters.");
 const schema = z
@@ -22,7 +23,7 @@ const schema = z
 export async function GET() {
   const gate = await requireUser();
   if (gate instanceof NextResponse) return gate;
-  return NextResponse.json(await getAiSettingsView(gate));
+  return NextResponse.json({ ...(await getAiSettingsView(gate)), localAvailable: localAiAvailable() });
 }
 
 export async function PUT(req: Request) {
@@ -50,5 +51,5 @@ export async function PUT(req: Request) {
   }
 
   await prisma.aiSettings.upsert({ where: { userId: gate }, create: { userId: gate, ...data }, update: data });
-  return NextResponse.json(await getAiSettingsView(gate));
+  return NextResponse.json({ ...(await getAiSettingsView(gate)), localAvailable: localAiAvailable() });
 }

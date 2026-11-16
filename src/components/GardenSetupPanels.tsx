@@ -11,6 +11,7 @@ import { SlideOver } from "@/components/SlideOver";
 import { DEVICE_TYPE_LABELS } from "@/components/device-ui";
 import { apiPatch, apiPost } from "@/lib/api-client";
 import { supportsRemotePorts } from "@/lib/device-pot";
+import { GROWTH_STAGES as ALL_GROWTH_STAGES, NEW_PLANT_STAGES, growthStageLabel } from "@/lib/growth-stages";
 import {
   PLANT_CATALOG,
   SOIL_LABELS,
@@ -31,7 +32,7 @@ function catalogHint(plant: PlantProfile) {
   return [plant.category, plant.aliases?.join(", ")].filter(Boolean).join(" · ");
 }
 
-const GROWTH_STAGES = ["seedling", "vegetative", "flowering", "fruiting", "mature"] as const;
+const GROWTH_STAGES = NEW_PLANT_STAGES;
 
 const DEVICE_TYPES = Object.entries(DEVICE_TYPE_LABELS).map(([value, label]) => ({ value, label }));
 
@@ -365,7 +366,7 @@ function PlantingFields({
             >
               {GROWTH_STAGES.map((stage) => (
                 <option key={stage} value={stage}>
-                  {stage.charAt(0).toUpperCase() + stage.slice(1)}
+                  {growthStageLabel(stage)}
                 </option>
               ))}
             </select>
@@ -868,7 +869,7 @@ export function DeviceKey({ created }: { created: { name: string; hardwareId: st
 // ---------------------------------------------------------------------------
 
 const HEALTH_OPTIONS = ["healthy", "at_risk", "diseased", "recovering", "unknown"] as const;
-const EDIT_STAGES = ["seedling", "vegetative", "flowering", "fruiting", "mature", "harvested"] as const;
+const EDIT_STAGES = ALL_GROWTH_STAGES;
 
 export interface EditablePot {
   id: string;
@@ -1080,7 +1081,7 @@ function EditPotFields({
             <select value={form.growthStage} onChange={(e) => set("growthStage", e.target.value as typeof form.growthStage)} className={fieldClass}>
               {EDIT_STAGES.map((stage) => (
                 <option key={stage} value={stage}>
-                  {stage.charAt(0).toUpperCase() + stage.slice(1)}
+                  {growthStageLabel(stage)}
                 </option>
               ))}
             </select>

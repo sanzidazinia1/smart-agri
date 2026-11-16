@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { requireUser } from "@/lib/api-auth";
 import { prisma } from "@/lib/db";
+import { GROWTH_STAGES } from "@/lib/growth-stages";
 
 const schema = z.object({
   gardenId: z.string().min(1).optional(),
@@ -11,7 +12,7 @@ const schema = z.object({
   commonName: z.string().min(1).optional(),
   variety: z.string().optional(),
   growthStage: z
-    .enum(["seedling", "vegetative", "flowering", "fruiting", "mature", "harvested"])
+    .enum(GROWTH_STAGES)
     .optional(),
   healthStatus: z
     .enum(["healthy", "at_risk", "diseased", "recovering", "unknown"])

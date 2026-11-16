@@ -12,6 +12,7 @@ import { generateDeviceKey } from "@/lib/device-key";
 import { findPlantProfile } from "@/lib/plant-catalog";
 import { nextPotNumber, potCode } from "@/lib/pot-number";
 import { MAX_PORTS, firstFreePort, supportsRemotePorts } from "@/lib/device-pot";
+import { GROWTH_STAGES } from "@/lib/growth-stages";
 
 const percent = z.number().min(0).max(100);
 
@@ -48,7 +49,7 @@ const schema = z
       commonName: z.string().trim().min(1).max(80),
       variety: z.string().trim().max(80).optional(),
       growthStage: z
-        .enum(["seedling", "vegetative", "flowering", "fruiting", "mature", "harvested"])
+        .enum(GROWTH_STAGES)
         .default("seedling"),
       plantedAt: z.string().datetime().optional(),
     }),

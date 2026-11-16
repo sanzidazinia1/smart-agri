@@ -17,7 +17,7 @@ and Smart Irrigation Management"*.
 
 | Feature | Where in the app |
 |---|---|
-| 🪴 Gardens, pots (POT-1, POT-2…) and plants — 86-plant guide with Bangla names and recommended soil & watering | Gardens, Pots, Plants |
+| 🪴 Gardens, pots (POT-1, POT-2…) and plants — 87-plant guide with Bangla names and recommended soil & watering | Gardens, Pots, Plants |
 | 🌡️ Live soil moisture from an ESP32 per pot; probe faults and offline boards are flagged | Dashboard, Devices |
 | 💧 Automatic irrigation per pot (start / stop levels), manual pump control, history | Irrigation |
 | 🔬 Leaf disease detection with first steps + home remedies; every scan saved | Disease AI |

@@ -41,6 +41,7 @@ enum SoilType {
 
 enum GrowthStage {
   seedling
+  stem_cutting
   vegetative
   flowering
   fruiting

@@ -13,6 +13,7 @@ import { errorMessage, useFeedback } from "@/components/Feedback";
 import { CardMenu, EmptyCard, HEALTH_PILL, ShowMore, SkeletonGrid, Tile, Toolbar, selectClass, useNow } from "@/components/ListPage";
 import { SOIL_LABELS, findPlantProfile, type SoilType } from "@/lib/plant-catalog";
 import { apiDelete } from "@/lib/api-client";
+import { GROWTH_STAGES } from "@/lib/growth-stages";
 
 interface Garden {
   id: string;
@@ -43,7 +44,7 @@ interface Plant {
 }
 
 type HealthFilter = "all" | "healthy" | "care" | "unknown";
-const STAGES = ["seedling", "vegetative", "flowering", "fruiting", "mature", "harvested"];
+const STAGES = GROWTH_STAGES;
 const PAGE_SIZE = 12;
 const DAY_MS = 24 * 60 * 60 * 1000;
 

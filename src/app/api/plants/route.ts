@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { requireUser } from "@/lib/api-auth";
 import { prisma } from "@/lib/db";
+import { GROWTH_STAGES } from "@/lib/growth-stages";
 
 export async function GET(req: Request) {
   const gate = await requireUser();
@@ -38,7 +39,7 @@ const schema = z.object({
   variety: z.string().optional(),
   plantedAt: z.string().datetime().optional(),
   growthStage: z
-    .enum(["seedling", "vegetative", "flowering", "fruiting", "mature", "harvested"])
+    .enum(GROWTH_STAGES)
     .default("seedling"),
   notes: z.string().optional(),
 });

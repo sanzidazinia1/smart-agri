@@ -1,9 +1,4 @@
-// TASK: "New devices found" — list boards waiting to be claimed, and claim one.
-//   GET                      -> boards announcing on the network (no codes)
-//   GET ?hardwareId=X        -> progress of *your* claim of X
-//   POST { ..., pairingCode } -> claim now with the code the board shows
-//   POST { ... } (no code)    -> ask the board to wait for its BOOT button;
-//                               the board completes the claim via /api/iot/pair
+// API /api/devices/pairing: list new boards waiting to be claimed, and claim one
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireUser } from "@/lib/api-auth";
@@ -19,11 +14,14 @@ import {
   pairingCodesMatch,
 } from "@/lib/device-pairing";
 
+// GET: list unclaimed boards, or with ?hardwareId= show your claim's progress
 export async function GET(req: Request) {
+  // Auth check: only logged-in users
   const gate = await requireUser();
   if (gate instanceof NextResponse) return gate;
 
   const hardwareId = new URL(req.url).searchParams.get("hardwareId");
+  // Progress of this user's claim: claimed, waiting for button, or available
   if (hardwareId) {
     const pairing = await prisma.devicePairing.findUnique({ where: { hardwareId } });
     if (pairing?.claimedAt && pairing.claimedByUserId === gate) {
@@ -42,6 +40,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ state: "not-found" });
   }
 
+  // Boards seen recently that nobody has claimed (pairing codes are not sent)
   const since = new Date(Date.now() - PAIRING_VISIBLE_MS);
   const pairings = await prisma.devicePairing.findMany({
     where: { claimedAt: null, lastSeenAt: { gte: since } },
@@ -49,8 +48,7 @@ export async function GET(req: Request) {
     select: { hardwareId: true, firmware: true, lastSeenAt: true, createdAt: true },
     take: 50,
   });
-  // Flag boards this user registered before (e.g. after a reset) — never
-  // reveal anything about other users' devices.
+  // Mark boards this user owned before; never reveal other users' devices.
   const mine = await prisma.device.findMany({
     where: { userId: gate, hardwareId: { in: pairings.map((pairing) => pairing.hardwareId) } },
     select: { hardwareId: true, name: true },
@@ -61,6 +59,7 @@ export async function GET(req: Request) {
   );
 }
 
+// Validation schema: a claim request (code is optional; no code = BOOT button)
 const claimSchema = z.object({
   hardwareId: z.string().trim().min(1),
   pairingCode: z.string().trim().optional(),
@@ -69,6 +68,7 @@ const claimSchema = z.object({
   name: z.string().trim().min(1).max(80),
 });
 
+// POST: claim a board with its 6-digit code, or wait for its BOOT button
 export async function POST(req: Request) {
   const gate = await requireUser();
   if (gate instanceof NextResponse) return gate;
@@ -86,11 +86,12 @@ export async function POST(req: Request) {
     );
   }
 
+  // Check the chosen garden/pot are valid before claiming
   const target = { hardwareId, userId, gardenId: gardenId ?? null, potId: potId ?? null, name };
   const problem = await claimTargetError(target);
   if (problem) return NextResponse.json({ error: problem }, { status: problem.includes("another account") ? 409 : 400 });
 
-  // --- Button press: the board finishes the claim when BOOT is pressed. ---
+  // No code: save the request; the board finishes it via /api/iot/pair on BOOT
   if (!parsed.data.pairingCode) {
     await prisma.devicePairing.update({
       where: { hardwareId },
@@ -105,7 +106,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ state: "waiting-button", msLeft: CONFIRM_WINDOW_MS }, { status: 202 });
   }
 
-  // --- Pairing code ---
+  // Pairing code path: check the code, with a limit on wrong guesses
   const code = normalizePairingCode(parsed.data.pairingCode);
   if (!code) return NextResponse.json({ error: "Enter the 6-digit code shown by the board." }, { status: 400 });
   if (pairing.failedAttempts >= MAX_FAILED_ATTEMPTS) {
@@ -123,6 +124,7 @@ export async function POST(req: Request) {
     );
   }
 
+  // Code matched: create the device for this user
   const { device } = await completeClaim(target, { deliverNow: false });
   return NextResponse.json({ state: "claimed", device }, { status: 201 });
 }

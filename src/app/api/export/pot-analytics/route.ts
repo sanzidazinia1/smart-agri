@@ -1,19 +1,20 @@
+// API /api/export/pot-analytics: download a pot's data as an Excel file
 import { NextResponse } from "next/server";
 import * as XLSX from "xlsx";
 import { requireUser } from "@/lib/api-auth";
 import { prisma } from "@/lib/db";
 import { getPotAnalytics, resolveAnalyticsDateRange } from "@/lib/pot-analytics";
 
-// Times go into the workbook as real Excel dates in Bangladesh time (UTC+6),
-// so they sort/filter as dates and match what the app shows. Computed by hand
-// so the result doesn't depend on the server's own time zone.
+// Times are saved as Excel dates in Bangladesh time (UTC+6), server-zone safe.
 const BD_OFFSET_MS = 6 * 60 * 60 * 1000;
 const DATE_FORMAT = "yyyy-mm-dd hh:mm:ss";
 const toExcelDate = (date: Date) => (date.getTime() + BD_OFFSET_MS) / 86_400_000 + 25569;
 const TIME_HEADER = "Time (Bangladesh)";
 
+// Friendly names for the range codes, shown in the Summary sheet
 const RANGE_LABEL: Record<string, string> = { "24h": "Last 24 hours", "7d": "Last 7 days", "30d": "Last 30 days", custom: "Custom" };
 
+// Format a date as "YYYY-MM-DD HH:MM" in Bangladesh time
 function bdText(date: Date) {
   return new Date(date.getTime() + BD_OFFSET_MS).toISOString().slice(0, 16).replace("T", " ");
 }
@@ -36,7 +37,9 @@ function sheet(rows: Record<string, unknown>[], emptyNote: string) {
   return ws;
 }
 
+// GET: build a workbook (summary, soil, weather, irrigation, pump) and send it
 export async function GET(req: Request) {
+  // Auth check: only logged-in users
   const userId = await requireUser();
   if (userId instanceof NextResponse) return userId;
   const query = new URL(req.url).searchParams;
@@ -50,6 +53,7 @@ export async function GET(req: Request) {
   if (!data) return NextResponse.json({ error: "Pot not found" }, { status: 404 });
   const extra = await prisma.pot.findUnique({ where: { id: potId }, select: { number: true, plant: { select: { commonName: true } } } });
 
+  // Summary numbers: average, min, max and time in the target moisture band
   const now = new Date();
   const end = dateRange.end && dateRange.end < now ? dateRange.end : now;
   const values = data.soilMoisture.map((r) => r.value);
@@ -138,6 +142,7 @@ export async function GET(req: Request) {
     "Pump",
   );
 
+  // Send the file as a download with a safe file name
   const bytes = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
   const filename = `${data.pot.label}-${range ?? "export"}`.replace(/[^a-z0-9_-]/gi, "_");
   return new NextResponse(bytes, {

@@ -1,13 +1,17 @@
+// Builds the text of pump, disease and device notifications
 import type { DeviceCommandType, PotIrrigationMode } from "@prisma/client";
 
+// Formats a date as an ISO time string
 function timestamp(value: Date) {
   return value.toISOString();
 }
 
+// Readable name for a watering mode
 function modeLabel(mode: PotIrrigationMode) {
   return mode === "AUTO" ? "Automatic" : "Manual";
 }
 
+// Message when the board confirms the pump started or stopped
 export function formatPumpAcknowledgementNotification(input: {
   gardenName: string;
   potLabel: string;
@@ -25,6 +29,7 @@ export function formatPumpAcknowledgementNotification(input: {
   return `Pump ${action}: ${input.gardenName} / ${input.potLabel}. ${modeLabel(input.mode)} mode. Confirmed by device at ${timestamp(input.occurredAt)}.${moisture}`;
 }
 
+// Message when the board failed to start or stop the pump
 export function formatPumpFailureNotification(input: {
   gardenName: string;
   potLabel: string;
@@ -37,6 +42,7 @@ export function formatPumpFailureNotification(input: {
   return `Pump command failed: device reported failure to ${action} the pump for ${input.gardenName} / ${input.potLabel} at ${timestamp(input.occurredAt)}.${detail}`;
 }
 
+// Message when a leaf disease scan finishes
 export function formatDiseaseAnalysisNotification(input: {
   gardenName: string;
   potLabel: string;
@@ -50,6 +56,7 @@ export function formatDiseaseAnalysisNotification(input: {
   return `Plant disease analysis completed: ${input.gardenName} / ${input.potLabel}.${confidence} Completed at ${timestamp(input.occurredAt)}.`;
 }
 
+// Message when a board stops sending data
 export function formatDeviceOfflineNotification(input: {
   deviceName: string;
   gardenName: string;
@@ -59,6 +66,7 @@ export function formatDeviceOfflineNotification(input: {
   return `Device telemetry appears offline: ${input.gardenName} / ${input.deviceName}. Last successful backend receipt was ${timestamp(input.lastSeenAt)} (offline threshold: ${input.thresholdSeconds}s).`;
 }
 
+// Message when a board comes back online
 export function formatDeviceRecoveredNotification(input: {
   deviceName: string;
   gardenName: string;

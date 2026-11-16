@@ -1,12 +1,13 @@
 "use client";
 
-// PAGE: Notifications — list alerts/messages and mark them read (one or all).
+// Notifications page: lists alerts, marks them read, shows Telegram history.
 import useSWR from "swr";
 import { Bell, Check } from "lucide-react";
 import { Badge, Card, IconButton, PageHeader, severityTone } from "@/components/ui";
 import { errorMessage, useFeedback } from "@/components/Feedback";
 import { apiPatch } from "@/lib/api-client";
 
+// One alert/message saved for the user.
 interface Notification {
   id: string;
   type: string;
@@ -17,6 +18,7 @@ interface Notification {
   createdAt: string;
 }
 
+// One attempt to send an alert to Telegram.
 interface TelegramDeliveryHistory {
   id: string;
   eventType: string;
@@ -28,8 +30,10 @@ interface TelegramDeliveryHistory {
   lastAttemptAt: string | null;
 }
 
+// The notifications page component.
 export default function NotificationsPage() {
   const { toast } = useFeedback();
+  // Load notifications and Telegram history; refresh every 15 seconds.
   const { data, mutate } = useSWR<Notification[]>("/api/notifications", {
     refreshInterval: 15000,
   });
@@ -37,6 +41,7 @@ export default function NotificationsPage() {
     refreshInterval: 15000,
   });
 
+  // Marks every notification as read.
   async function markAll() {
     try {
       await apiPatch("/api/notifications", { all: true });
@@ -46,6 +51,7 @@ export default function NotificationsPage() {
       toast.error(errorMessage(err, "Couldn't update notifications"));
     }
   }
+  // Marks a single notification as read.
   async function markOne(id: string) {
     await apiPatch("/api/notifications", { id });
     mutate();
@@ -66,6 +72,7 @@ export default function NotificationsPage() {
         }
       />
 
+      {/* List of notifications */}
       <Card>
         <div className="divide-y divide-slate-100 dark:divide-slate-800">
           {(data ?? []).map((n) => (
@@ -101,6 +108,7 @@ export default function NotificationsPage() {
         </div>
       </Card>
 
+      {/* Telegram delivery history */}
       <Card className="mt-6">
         <h2 className="text-sm font-bold">Telegram delivery history</h2>
         <p className="mt-1 text-xs text-slate-400">Delivery attempts for events owned by you. Messages are sent to the server-configured destination.</p>

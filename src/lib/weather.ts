@@ -1,6 +1,6 @@
-// Weather is deliberately keyed by garden ID. Never use a user-wide or
-// default-location cache for garden data.
+// Gets weather for each garden from Open-Meteo, cached per garden ID
 
+// Forecast for one day
 export interface WeatherForecastDay {
   day: string;
   high: number;
@@ -12,6 +12,7 @@ export interface WeatherForecastDay {
   uvIndex: number | null;
 }
 
+// Current weather plus a short forecast
 export interface WeatherResult {
   current: {
     temp: number;
@@ -27,6 +28,7 @@ export interface WeatherResult {
   isStale: boolean;
 }
 
+// The parts of Open-Meteo's reply we use
 interface OpenMeteoResponse {
   current: {
     temperature_2m: number;
@@ -48,6 +50,7 @@ interface OpenMeteoResponse {
   };
 }
 
+// A cached weather result for one garden
 interface CacheEntry {
   lat: number;
   lng: number;
@@ -55,11 +58,14 @@ interface CacheEntry {
   weather: WeatherResult;
 }
 
+// Thrown when weather can't be loaded and there is no saved copy
 export class WeatherUnavailableError extends Error {}
 
+// In-memory cache of weather by garden ID (default 10 minutes)
 const gardenWeatherCache = new Map<string, CacheEntry>();
 const DEFAULT_CACHE_TTL_MS = 10 * 60 * 1000;
 
+// How long to keep cached weather (from env, or the default)
 function cacheTtlMs() {
   const seconds = Number(process.env.WEATHER_CACHE_TTL_SECONDS ?? "600");
   return Number.isFinite(seconds) && seconds > 0
@@ -67,6 +73,7 @@ function cacheTtlMs() {
     : DEFAULT_CACHE_TTL_MS;
 }
 
+// Turns an Open-Meteo weather code into a word like "Rain"
 function descriptionFor(code: number) {
   if (code === 0) return "Clear";
   if ([1, 2, 3].includes(code)) return "Partly cloudy";
@@ -78,10 +85,12 @@ function descriptionFor(code: number) {
   return "Unknown";
 }
 
+// Rounds to a whole number
 function round(value: number) {
   return Math.round(value);
 }
 
+// Converts Open-Meteo's reply into our weather shape (today + next 3 days)
 function toWeatherResult(data: OpenMeteoResponse): WeatherResult {
   return {
     current: {
@@ -113,6 +122,7 @@ function toWeatherResult(data: OpenMeteoResponse): WeatherResult {
   };
 }
 
+// Returns a garden's weather, from cache if fresh, else from Open-Meteo
 export async function getGardenWeather(
   garden: { id: string; lat: number; lng: number },
   options: { fetcher?: typeof fetch; ttlMs?: number } = {},
@@ -142,7 +152,7 @@ export async function getGardenWeather(
     });
     return weather;
   } catch (error) {
-    // Last-known data is returned only for the identical garden and coordinates.
+    // On error, reuse old data only if the garden's location hasn't changed
     if (cached && cached.lat === garden.lat && cached.lng === garden.lng) {
       return { ...cached.weather, isStale: true };
     }
@@ -150,6 +160,7 @@ export async function getGardenWeather(
   }
 }
 
+// Empties the weather cache (used by tests)
 export function clearGardenWeatherCacheForTests() {
   gardenWeatherCache.clear();
 }

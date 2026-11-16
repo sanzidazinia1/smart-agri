@@ -1,20 +1,14 @@
+// Checks that an API request comes from a logged-in user
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 
-/**
- * Replaces the Express `requireAuth` middleware. Call at the top of a
- * protected route handler. Returns the userId, or a 401 NextResponse to
- * short-circuit. Usage:
- *
- *   const gate = await requireUser();
- *   if (gate instanceof NextResponse) return gate;
- *   const userId = gate;
- */
+// Returns the logged-in user's id, or a 401 "Unauthorized" response to return
 export async function requireUser(): Promise<string | NextResponse> {
   let session;
   try {
     session = await auth();
   } catch (error) {
+    // No request (e.g. called at build time) counts as not logged in
     if (
       error instanceof Error &&
       error.message.includes("outside a request scope")

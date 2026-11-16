@@ -1,10 +1,13 @@
+// Checks that a request really comes from a registered board (via its device key)
 import { prisma } from "@/lib/db";
 import { hashDeviceKey } from "@/lib/device-key";
 
+// Returns the board if its key matches its hardware ID, otherwise null
 export async function authenticateDevice(req: Request) {
   const key = req.headers.get("x-device-key");
   if (!key) return null;
 
+  // The board's hardware ID comes from the URL or, if missing, the JSON body
   const { searchParams } = new URL(req.url);
   const hardwareIdFromQuery = searchParams.get("deviceId") ?? searchParams.get("hardwareId");
 
@@ -33,6 +36,7 @@ export async function authenticateDevice(req: Request) {
     },
   });
 
+  // Compare hashes; the real key is never stored
   if (!device || device.apiKeyHash !== hashDeviceKey(key)) return null;
   return device;
 }

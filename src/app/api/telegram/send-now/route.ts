@@ -1,11 +1,12 @@
-// Send queued Telegram alerts right away (instead of waiting for the
-// scheduled worker). Safe to call repeatedly: deliveries are claimed atomically.
+// API /api/telegram/send-now: send queued Telegram alerts now, not on schedule
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/api-auth";
 
 export const runtime = "nodejs";
 
+// POST: send this user's queued alerts (safe to repeat; no double sends)
 export async function POST() {
+  // Auth check: only logged-in users
   const gate = await requireUser();
   if (gate instanceof NextResponse) return gate;
   const { getUserTelegramConfig } = await import("@/lib/telegram-settings");

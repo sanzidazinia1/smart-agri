@@ -1,26 +1,28 @@
 "use client";
 
-// A thumbnail that opens the full image over the page, with zoom:
-// buttons (− / + / fit), mouse wheel, double-click, pinch on touch screens,
-// and drag to move around when zoomed in. Closes with Esc, ✕ or a click on
-// the dark background.
+// Thumbnail that opens a full-screen image viewer with zoom, pinch and drag
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ExternalLink, Maximize2, Minus, Plus, ScanSearch, X } from "lucide-react";
 
+// Zoom limits and how much each +/- click zooms
 const MIN = 1;
 const MAX = 6;
 const STEP = 1.4;
 
+// Current zoom level and image offset; FIT means "whole image, no zoom"
 type View = { scale: number; x: number; y: number };
 const FIT: View = { scale: 1, x: 0, y: 0 };
+// Keep a number between lo and hi
 const clamp = (value: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, value));
 
+// Clickable thumbnail; opens the full-screen viewer on top of the page
 export function ImageLightbox({ src, alt, className = "" }: { src: string; alt: string; className?: string }) {
   const [open, setOpen] = useState(false);
 
   return (
     <>
+      {/* Thumbnail button with an expand icon */}
       <button
         type="button"
         onClick={() => setOpen(true)}
@@ -38,7 +40,9 @@ export function ImageLightbox({ src, alt, className = "" }: { src: string; alt: 
   );
 }
 
+// Full-screen viewer with zoom controls
 function Viewer({ src, alt, onClose }: { src: string; alt: string; onClose: () => void }) {
+  // Current zoom/position of the image
   const [view, setView] = useState<View>(FIT);
   // While a finger / mouse is down the image follows it directly (no easing).
   const [dragging, setDragging] = useState(false);
@@ -58,6 +62,7 @@ function Viewer({ src, alt, onClose }: { src: string; alt: string; onClose: () =
     });
   }, []);
 
+  // Zoom in or out by a factor, keeping the point (cx, cy) still
   const zoomBy = useCallback((factor: number, cx = 0, cy = 0) => {
     setView((v) => {
       const next = clamp(v.scale * factor, MIN, MAX);
@@ -99,11 +104,13 @@ function Viewer({ src, alt, onClose }: { src: string; alt: string; onClose: () =
     return () => stage.removeEventListener("wheel", onWheel);
   }, [zoomBy]);
 
+  // Pointer position relative to the centre of the stage
   const center = (event: { clientX: number; clientY: number }) => {
     const rect = stageRef.current!.getBoundingClientRect();
     return { cx: event.clientX - rect.left - rect.width / 2, cy: event.clientY - rect.top - rect.height / 2 };
   };
 
+  // Finger or mouse pressed: start dragging, or start pinching with 2 fingers
   function onPointerDown(event: React.PointerEvent) {
     (event.target as Element).setPointerCapture?.(event.pointerId);
     pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
@@ -115,6 +122,7 @@ function Viewer({ src, alt, onClose }: { src: string; alt: string; onClose: () =
     }
   }
 
+  // Finger or mouse moved: pinch-zoom with 2 fingers, drag with 1
   function onPointerMove(event: React.PointerEvent) {
     const last = pointers.current.get(event.pointerId);
     if (!last) return;
@@ -134,18 +142,21 @@ function Viewer({ src, alt, onClose }: { src: string; alt: string; onClose: () =
     }
   }
 
+  // Finger or mouse lifted: stop dragging or pinching
   function onPointerUp(event: React.PointerEvent) {
     pointers.current.delete(event.pointerId);
     if (pointers.current.size < 2) pinch.current = null;
     if (pointers.current.size === 0) setDragging(false);
   }
 
+  // Double-click: zoom in to that spot, or back to fit if already zoomed
   function onDoubleClick(event: React.MouseEvent) {
     const { cx, cy } = center(event);
     if (view.scale > 1) setView(FIT);
     else zoomTo(2.5, cx, cy);
   }
 
+  // Zoom as a percentage, and shared style for the control buttons
   const percent = Math.round(view.scale * 100);
   const control =
     "grid h-9 w-9 place-items-center rounded-lg text-white hover:bg-white/15 disabled:opacity-40 disabled:hover:bg-transparent";
@@ -223,6 +234,7 @@ function Viewer({ src, alt, onClose }: { src: string; alt: string; onClose: () =
           <ScanSearch size={18} />
         </button>
       </div>
+      {/* Usage hint above the controls */}
       <p className="pointer-events-none absolute bottom-[4.5rem] left-1/2 hidden -translate-x-1/2 text-xs text-white/50 sm:block">
         Scroll or double-click to zoom · drag to move
       </p>

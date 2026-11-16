@@ -1,4 +1,4 @@
-// TASK: Domain CRUD — Plants (crops tracked for growth stage + health status).
+// API /api/plants: list the user's plants and add a plant to a pot
 import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
@@ -6,7 +6,9 @@ import { requireUser } from "@/lib/api-auth";
 import { prisma } from "@/lib/db";
 import { GROWTH_STAGES } from "@/lib/growth-stages";
 
+// GET: list plants (optionally for one garden) with their garden and pot
 export async function GET(req: Request) {
+  // Auth check: only logged-in users
   const gate = await requireUser();
   if (gate instanceof NextResponse) return gate;
   const { searchParams } = new URL(req.url);
@@ -31,6 +33,7 @@ export async function GET(req: Request) {
   return NextResponse.json(plants);
 }
 
+// Validation schema: data needed to add a plant
 const schema = z.object({
   gardenId: z.string().min(1),
   potId: z.string().min(1),
@@ -44,6 +47,7 @@ const schema = z.object({
   notes: z.string().optional(),
 });
 
+// POST: add a plant to an empty pot the user owns
 export async function POST(req: Request) {
   const gate = await requireUser();
   if (gate instanceof NextResponse) return gate;
@@ -60,6 +64,7 @@ export async function POST(req: Request) {
     if (!garden) {
       return NextResponse.json({ error: "Garden not found" }, { status: 404 });
     }
+    // The pot must be in that garden and not already have a plant
     const pot = await prisma.pot.findFirst({
       where: {
         id: parsed.data.potId,
@@ -91,6 +96,7 @@ export async function POST(req: Request) {
     });
     return NextResponse.json(plant, { status: 201 });
   } catch (error) {
+    // P2002 = unique clash: someone added a plant to this pot at the same time
     if (
       error instanceof Prisma.PrismaClientKnownRequestError &&
       error.code === "P2002"

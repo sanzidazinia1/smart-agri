@@ -1,5 +1,4 @@
-// TASK: Domain CRUD — Device update (PATCH: rename / place in a garden and
-// pot, or take out of one) and delete (DELETE) by id.
+// API /api/devices/[id]: edit one device (name, garden, pots, ports) or delete it
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireUser } from "@/lib/api-auth";
@@ -7,6 +6,7 @@ import { prisma } from "@/lib/db";
 import { otherDeviceOnPot } from "@/lib/device-claim";
 import { MAX_PORTS } from "@/lib/device-pot";
 
+// Validation schema: fields allowed in a device update (no extra keys)
 const schema = z
   .object({
     name: z.string().trim().min(1).max(80).optional(),
@@ -14,8 +14,7 @@ const schema = z
     gardenId: z.string().trim().min(1).nullable().optional(),
     // Single-pot boards: the pot it serves (null = none). Goes on port 1.
     potId: z.string().trim().min(1).nullable().optional(),
-    // How many ports (probe + pump pairs) the board runs, 1–6. Firmware 2.9+
-    // picks it up on its next command poll.
+    // Number of probe+pump ports (1–6); board picks it up on its next poll.
     portCount: z.number().int().min(1).max(MAX_PORTS).optional(),
     // Multi-pot boards: what each port serves (potId null = disconnect that port).
     ports: z
@@ -25,21 +24,25 @@ const schema = z
   })
   .strict();
 
+// PATCH: update a device after checking ownership, gardens, pots and ports
 export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  // Auth check: only logged-in users
   const gate = await requireUser();
   if (gate instanceof NextResponse) return gate;
   const { id } = await params;
 
   const parsed = schema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "Invalid device update" }, { status: 400 });
+  // Ownership check: the device must belong to this user
   const device = await prisma.device.findFirst({ where: { id, userId: gate }, select: { id: true, gardenId: true, portCount: true } });
   if (!device) return NextResponse.json({ error: "Device not found" }, { status: 404 });
 
   const { name, potId, ports, portCount } = parsed.data;
 
+  // Changing port count: refuse if a port being removed still waters a pot
   if (portCount !== undefined) {
     const busy = await prisma.devicePotMapping.findFirst({
       where: { deviceId: id, port: { gt: portCount } },
@@ -69,6 +72,7 @@ export async function PATCH(
     }
   }
 
+  // Multi-pot boards: check every port/pot pair is valid and free
   if (ports) {
     if (ports.some((entry) => entry.potId) && !gardenId) return NextResponse.json({ error: "Choose the pots' garden too" }, { status: 400 });
     const potIds = ports.map((entry) => entry.potId).filter((value): value is string => Boolean(value));
@@ -87,6 +91,7 @@ export async function PATCH(
   }
 
   const gardenChanged = gardenId !== device.gardenId;
+  // DB write: save the device and its pot links all-or-nothing
   await prisma.$transaction(async (tx) => {
     await tx.device.update({ where: { id }, data: { ...(name ? { name } : {}), gardenId } });
     // Moving gardens (or setting a pot) replaces the pot connection.
@@ -104,6 +109,7 @@ export async function PATCH(
   return NextResponse.json({ success: true });
 }
 
+// DELETE: remove one of the user's devices
 export async function DELETE(
   _req: Request,
   { params }: { params: Promise<{ id: string }> },

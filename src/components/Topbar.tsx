@@ -1,22 +1,27 @@
 "use client";
 
+// Top bar of the app with mobile menu button, notifications and user menu
 import { Menu, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { NotificationsMenu, UserMenu } from "@/components/HeaderMenus";
 import { Sidebar } from "@/components/Sidebar";
 
+// Top bar; on mobile it also opens the sidebar as a slide-in drawer
 export function Topbar({ email, userName = null }: { email: string; userName?: string | null }) {
+  // Mobile drawer open state and refs for focus handling
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const mobileDrawerRef = useRef<HTMLDivElement>(null);
   const wasMobileMenuOpen = useRef(false);
 
+  // Close the mobile drawer
   function closeMobileMenu() {
     setMobileMenuOpen(false);
   }
 
+  // While the drawer is open: focus close button, Esc closes, Tab stays inside
   useEffect(() => {
     if (!mobileMenuOpen) return;
 
@@ -47,6 +52,7 @@ export function Topbar({ email, userName = null }: { email: string; userName?: s
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [mobileMenuOpen]);
 
+  // After the drawer closes, put focus back on the menu button
   useEffect(() => {
     if (!mobileMenuOpen && wasMobileMenuOpen.current) {
       menuButtonRef.current?.focus();
@@ -57,6 +63,7 @@ export function Topbar({ email, userName = null }: { email: string; userName?: s
   return (
     <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-slate-200 bg-white/90 px-4 backdrop-blur dark:border-slate-800 dark:bg-slate-950/90 sm:px-6 lg:px-8">
       <div className="flex min-w-0 items-center text-sm font-bold text-slate-500 dark:text-slate-400">
+        {/* Mobile "open menu" button */}
         <button
           ref={menuButtonRef}
           type="button"
@@ -69,11 +76,13 @@ export function Topbar({ email, userName = null }: { email: string; userName?: s
           <Menu size={20} aria-hidden="true" />
         </button>
       </div>
+      {/* Notifications and user menu */}
       <div className="flex items-center gap-2">
         <NotificationsMenu />
         <span aria-hidden="true" className="h-6 w-px bg-slate-200 dark:bg-slate-800" />
         <UserMenu email={email} userName={userName} />
       </div>
+      {/* Mobile navigation drawer, rendered on top of the page */}
       {mobileMenuOpen
         ? createPortal(
             <div className="fixed inset-0 z-50 md:hidden">

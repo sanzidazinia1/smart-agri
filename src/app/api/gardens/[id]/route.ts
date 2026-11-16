@@ -1,9 +1,10 @@
-// TASK: Domain CRUD — Garden update (PATCH) / delete (DELETE) by id.
+// API /api/gardens/[id]: read, update or delete one garden
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireUser } from "@/lib/api-auth";
 import { prisma } from "@/lib/db";
 
+// Validation schema: garden fields that may be changed
 const schema = z.object({
   name: z.string().min(1).optional(),
   type: z.enum(["outdoor", "greenhouse", "indoor", "hydroponic"]).optional(),
@@ -14,10 +15,12 @@ const schema = z.object({
   notes: z.string().optional(),
 });
 
+// GET: return one of the user's gardens with its counts
 export async function GET(
   _req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  // Auth check: only logged-in users
   const gate = await requireUser();
   if (gate instanceof NextResponse) return gate;
   const { id } = await params;
@@ -32,6 +35,7 @@ export async function GET(
   return NextResponse.json(garden);
 }
 
+// PATCH: update a garden's details
 export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -44,6 +48,7 @@ export async function PATCH(
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid update" }, { status: 400 });
   }
+  // Lat and lng must come together, never just one
   const hasLat = Object.prototype.hasOwnProperty.call(parsed.data, "lat");
   const hasLng = Object.prototype.hasOwnProperty.call(parsed.data, "lng");
   if (hasLat !== hasLng) {
@@ -53,6 +58,7 @@ export async function PATCH(
     );
   }
 
+  // DB write: userId in the filter means only the owner can update it
   const result = await prisma.garden.updateMany({
     where: { id, userId: gate },
     data: parsed.data,
@@ -64,6 +70,7 @@ export async function PATCH(
   return NextResponse.json(garden);
 }
 
+// DELETE: remove one of the user's gardens
 export async function DELETE(
   _req: Request,
   { params }: { params: Promise<{ id: string }> },

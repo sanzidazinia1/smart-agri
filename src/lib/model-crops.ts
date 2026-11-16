@@ -1,6 +1,6 @@
-// The crops the leaf-disease model was trained on (PlantVillage), with the
-// names people use for them. Used to tell the AI which crop a pot grows (it
-// then only considers that crop's diseases) and to explain results.
+// Crops the local disease model knows, and other names people use for them
+
+// Each model crop and the words that mean it (e.g. "alu" = potato)
 export const MODEL_CROPS: Record<string, string[]> = {
   apple: ["apple"],
   blueberry: ["blueberry"],
@@ -18,7 +18,7 @@ export const MODEL_CROPS: Record<string, string[]> = {
   tomato: ["tomato"],
 };
 
-/** Which model crop this plant is ("tomato"), or null when the model doesn't know it. */
+// Which model crop a plant is (e.g. "tomato"), or null if the model doesn't know it
 export function modelCropFor(plantName: string | null | undefined) {
   const name = (plantName ?? "").toLowerCase();
   if (!name) return null;

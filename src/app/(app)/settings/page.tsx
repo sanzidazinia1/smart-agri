@@ -1,8 +1,6 @@
 "use client";
 
-// PAGE: Settings — your profile (name, email) and password. The profile card
-// edits in place; the password form shows its rules live and only submits
-// when they're all met.
+// Settings page: profile, password, Telegram alerts and Disease AI setup.
 import { useState } from "react";
 import useSWR from "swr";
 import {
@@ -30,6 +28,7 @@ import { apiDelete, apiPatch, apiPost, apiPut } from "@/lib/api-client";
 import { timeAgo } from "@/components/device-ui";
 import { DiseaseAiCard } from "@/components/DiseaseAiSettings";
 
+// The logged-in user's profile and how many gardens/pots/devices they have.
 interface Profile {
   email: string;
   userName: string | null;
@@ -37,15 +36,19 @@ interface Profile {
   _count: { gardens: number; pots: number; devices: number };
 }
 
+// Shared style for text inputs on this page.
 const inputClass =
   "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm placeholder:text-slate-400 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-slate-700 dark:bg-slate-950";
 
+// Gets initials from a name for the avatar circle (e.g. "SZ").
 function initials(name: string) {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   return ((parts[0]?.[0] ?? "") + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase() || "?";
 }
 
+// The settings page: profile header and all the settings cards.
 export default function SettingsPage() {
+  // Load the user's profile.
   const { data, mutate } = useSWR<Profile>("/api/profile");
   const name = data?.userName?.trim() || data?.email.split("@")[0] || "";
 
@@ -53,7 +56,7 @@ export default function SettingsPage() {
     <div className="mx-auto max-w-4xl">
       <PageHeader title="Settings" subtitle="Your profile and sign-in details." />
 
-      {/* Identity */}
+      {/* Profile header: avatar, name, email and counts */}
       <section className="mb-5 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
         <div className="h-16 bg-gradient-to-r from-emerald-500/20 via-teal-500/10 to-sky-500/10 dark:from-emerald-500/20 dark:via-teal-500/10 dark:to-sky-500/5" />
         <div className="flex flex-wrap items-center gap-x-4 gap-y-3 px-5 pb-5">
@@ -81,10 +84,12 @@ export default function SettingsPage() {
         </div>
       </section>
 
+      {/* Profile and password cards */}
       <div className="grid gap-5 lg:grid-cols-2">
         {data ? <ProfileCard profile={data} onSaved={() => mutate()} /> : <CardSkeleton />}
         <PasswordCard />
       </div>
+      {/* Telegram alerts and Disease AI cards */}
       <div className="mt-5">
         <TelegramCard />
       </div>
@@ -95,6 +100,7 @@ export default function SettingsPage() {
   );
 }
 
+// Small grey pill with an icon and text.
 function Chip({ icon: Icon, text }: { icon: LucideIcon; text: string }) {
   return (
     <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
@@ -104,6 +110,7 @@ function Chip({ icon: Icon, text }: { icon: LucideIcon; text: string }) {
   );
 }
 
+// White card with an icon header, used by every settings card.
 function Section({ icon: Icon, title, subtitle, action, children }: { icon: LucideIcon; title: string; subtitle: string; action?: React.ReactNode; children: React.ReactNode }) {
   return (
     <section className="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
@@ -124,6 +131,7 @@ function Section({ icon: Icon, title, subtitle, action, children }: { icon: Luci
 
 // ---------- Profile ----------
 
+// Shows the name/email and lets the user edit them.
 function ProfileCard({ profile, onSaved }: { profile: Profile; onSaved: () => void }) {
   const { toast } = useFeedback();
   const [editing, setEditing] = useState(false);
@@ -132,6 +140,7 @@ function ProfileCard({ profile, onSaved }: { profile: Profile; onSaved: () => vo
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
+  // Opens the edit form filled with the current values.
   function startEditing() {
     setUserName(profile.userName ?? "");
     setEmail(profile.email);
@@ -139,9 +148,11 @@ function ProfileCard({ profile, onSaved }: { profile: Profile; onSaved: () => vo
     setEditing(true);
   }
 
+  // Has anything changed? (Save is disabled if not.)
   const emailChanged = email.trim().toLowerCase() !== profile.email;
   const dirty = userName.trim() !== (profile.userName ?? "") || emailChanged;
 
+  // Saves the new name/email to the server.
   async function save(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
@@ -213,6 +224,7 @@ function ProfileCard({ profile, onSaved }: { profile: Profile; onSaved: () => vo
   );
 }
 
+// One read-only label + value line.
 function Row({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: string }) {
   return (
     <div className="flex items-center gap-3">
@@ -225,6 +237,7 @@ function Row({ icon: Icon, label, value }: { icon: LucideIcon; label: string; va
   );
 }
 
+// A form label with an optional icon and hint around an input.
 function Field({ label, icon: Icon, hint, children }: { label: string; icon?: LucideIcon; hint?: string; children: React.ReactNode }) {
   return (
     <label className="block">
@@ -240,11 +253,13 @@ function Field({ label, icon: Icon, hint, children }: { label: string; icon?: Lu
 
 // ---------- Password ----------
 
+// Password rules shown as a live checklist.
 const RULES: { label: string; test: (password: string) => boolean }[] = [
   { label: "At least 8 characters", test: (p) => p.length >= 8 },
   { label: "A letter and a number", test: (p) => /[a-z]/i.test(p) && /\d/.test(p) },
 ];
 
+// Rates a password as Weak / Okay / Strong for the meter.
 function strength(password: string) {
   if (!password) return { score: 0, label: "", bar: "" };
   let score = 0;
@@ -258,6 +273,7 @@ function strength(password: string) {
   return { score: 3, label: "Strong", bar: "bg-emerald-500" };
 }
 
+// Lets the user change their password.
 function PasswordCard() {
   const { toast } = useFeedback();
   const [open, setOpen] = useState(false);
@@ -268,12 +284,14 @@ function PasswordCard() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
+  // Checks that decide if "Update password" can be pressed.
   const rulesMet = RULES.every((rule) => rule.test(next));
   const matches = next.length > 0 && next === confirm;
   const different = next !== current;
   const canSave = Boolean(current) && rulesMet && matches && different && !saving;
   const meter = strength(next);
 
+  // Clears the password form.
   function reset() {
     setCurrent("");
     setNext("");
@@ -282,6 +300,7 @@ function PasswordCard() {
     setError("");
   }
 
+  // Sends the current and new password to the server.
   async function save(e: React.FormEvent) {
     e.preventDefault();
     if (!canSave) return;
@@ -299,6 +318,7 @@ function PasswordCard() {
     }
   }
 
+  // Show or hide the typed passwords.
   const type = show ? "text" : "password";
 
   return (
@@ -390,12 +410,14 @@ function PasswordCard() {
   );
 }
 
+// Grey placeholder while a card loads.
 function CardSkeleton() {
   return <div className="h-56 animate-pulse rounded-2xl bg-slate-100 dark:bg-slate-900" />;
 }
 
 // ---------- Telegram ----------
 
+// Telegram connection status and alert queue counts from the API.
 interface TelegramStatus {
   configured: boolean;
   source: "app" | "env" | null;
@@ -405,12 +427,16 @@ interface TelegramStatus {
   lastError: { code: string; at: string } | null;
 }
 
+// Alert types sent to Telegram (shown as help text).
 const ALERT_TYPES = ["Pump turned on/off", "Pump command failed", "Device offline", "Device back online", "Disease scan result"];
 
+// Style for small inline code text.
 const code = "rounded bg-slate-100 px-1 py-px font-mono text-[12px] dark:bg-slate-800";
 
+// Connect a Telegram bot, send tests and see the alert queue.
 function TelegramCard() {
   const { toast, confirm } = useFeedback();
+  // Load Telegram status every 15 seconds.
   const { data, mutate } = useSWR<TelegramStatus>("/api/telegram/status", { refreshInterval: 15000 });
   const [busy, setBusy] = useState<string | null>(null);
   const [token, setToken] = useState("");
@@ -418,6 +444,7 @@ function TelegramCard() {
   const [error, setError] = useState("");
   const [replacing, setReplacing] = useState(false);
 
+  // Runs one Telegram action: shows busy, a success toast or an error.
   async function run(kind: string, action: () => Promise<string | void>) {
     setBusy(kind);
     setError("");
@@ -432,6 +459,7 @@ function TelegramCard() {
     }
   }
 
+  // Saves a new bot token.
   const connect = (e: React.FormEvent) => {
     e.preventDefault();
     run("connect", async () => {
@@ -441,21 +469,25 @@ function TelegramCard() {
       return result.chatFound ? `Connected to @${result.botUsername}` : `Bot @${result.botUsername} added — now press Start in Telegram`;
     });
   };
+  // Finds the chat after the user pressed Start in Telegram.
   const detect = () =>
     run("detect", async () => {
       const result = await apiPost<{ chatName: string }>("/api/telegram/settings/detect", {});
       return `Connected to ${result.chatName}`;
     });
+  // Sends a test message.
   const test = () =>
     run("test", async () => {
       await apiPost("/api/telegram/test", {});
       return "Test message sent — check Telegram";
     });
+  // Sends any waiting alerts right away.
   const sendNow = () =>
     run("send", async () => {
       const result = await apiPost<{ sent: number }>("/api/telegram/send-now", {});
       return result.sent ? `Sent ${result.sent} queued ${result.sent === 1 ? "alert" : "alerts"}` : "Nothing waiting to send";
     });
+  // Pauses Telegram alerts but keeps the bot saved.
   const disconnect = async () => {
     const ok = await confirm({
       title: "Disconnect Telegram?",
@@ -468,11 +500,13 @@ function TelegramCard() {
       return "Telegram disconnected — your bot is saved";
     });
   };
+  // Turns a paused bot back on.
   const reconnect = () =>
     run("reconnect", async () => {
       const result = await apiPatch<{ botUsername: string; chatFound: boolean }>("/api/telegram/settings", {});
       return result.chatFound ? `Reconnected to @${result.botUsername}` : `@${result.botUsername} is back — now press Start in Telegram`;
     });
+  // Deletes the saved bot token.
   const forget = async () => {
     const ok = await confirm({
       title: "Forget this bot?",
@@ -487,6 +521,7 @@ function TelegramCard() {
     });
   };
 
+  // Which setup step to show: 1 add bot, 2 press Start, 3 done.
   const paused = Boolean(data?.bot?.paused) && !replacing;
   const step = !data ? 0 : data.bot?.chatConnected && !replacing ? 3 : data.bot && !replacing ? 2 : 1;
   const usingEnv = data?.source === "env" && !data.bot;
@@ -516,7 +551,7 @@ function TelegramCard() {
       ) : (
         <div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_16rem]">
           <div className="min-w-0 space-y-4">
-            {/* Progress */}
+            {/* Setup progress steps */}
             {!usingEnv && !paused ? (
               <ol className="flex flex-wrap items-center gap-2 text-xs font-semibold">
                 {["Add your bot", "Press Start", "Done"].map((label, i) => {
@@ -540,6 +575,7 @@ function TelegramCard() {
               </ol>
             ) : null}
 
+            {/* Main area: paused, .env bot, add token, press Start, or connected */}
             {paused && data.bot ? (
               <div className="space-y-3">
                 <div className="flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50/70 p-3.5 dark:border-amber-500/30 dark:bg-amber-500/10">
@@ -693,6 +729,7 @@ function TelegramCard() {
               </div>
             ) : null}
 
+            {/* Test / send now / disconnect buttons */}
             {data.configured && step !== 1 && step !== 2 ? (
               <div className="flex flex-wrap gap-2">
                 <button
@@ -728,6 +765,7 @@ function TelegramCard() {
               </div>
             ) : null}
 
+            {/* Error or last problem message */}
             {error ? (
               <p className="flex items-start gap-1.5 text-sm font-semibold text-rose-600 dark:text-rose-400">
                 <CircleAlert size={15} className="mt-0.5 shrink-0" />
@@ -744,6 +782,7 @@ function TelegramCard() {
             </p>
           </div>
 
+          {/* Alert queue counts */}
           <dl className="grid grid-cols-2 gap-2 self-start">
             {[
               ["Waiting", data.queue.pending],

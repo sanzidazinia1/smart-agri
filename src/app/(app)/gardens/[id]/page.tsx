@@ -1,7 +1,6 @@
 "use client";
 
-// PAGE: Garden details — one garden at a glance (health, key numbers,
-// weather, location) with tabs for its pots, devices and recent activity.
+// Garden details page: one garden's numbers, map, weather, pots, devices, activity.
 import { Suspense, useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
@@ -60,16 +59,18 @@ import {
   setSelectedGardenId,
 } from "@/lib/selected-garden";
 
-// Read-only map preview; Leaflet is client-only.
+// Read-only map preview, loaded in the browser only (Leaflet needs it)
 const GardenMap = dynamic(() => import("@/components/LocationPicker"), {
   ssr: false,
   loading: () => <div className="h-56 animate-pulse rounded-xl bg-slate-100 dark:bg-slate-800" />,
 });
 
+// Garden from /api/gardens/[id] plus its notes
 interface GardenDetail extends Garden {
   notes: string | null;
 }
 
+// Live garden data from the dashboard API: weather, devices, pots, history
 interface GardenActivity {
   weather: {
     current: { temp: number; humidity: number; rainProb: number; windSpeed: number; description: string };
@@ -103,7 +104,7 @@ interface GardenActivity {
     plant: { id: string; commonName: string; healthStatus: string } | null;
     currentMoisture: number | null;
     moistureRecordedAt: string | null;
-    /** The device connected to this pot, and the port of it that this pot uses. */
+    /** The device connected to this pot and the port it uses. */
     sensors: { id: string; name: string; port?: number; status: string; lastSeenAt: string | null }[];
   }[];
   pumpHistory: { id: string; potId: string | null; mode: string; status: string; reason: string | null; startedAt: string }[];
@@ -113,11 +114,12 @@ interface GardenActivity {
   resolvedAlertList?: { id: string; severity: string; title: string; message: string; resolvedAt: string | null }[];
 }
 
+// The page's tabs
 type Tab = "overview" | "pots" | "devices" | "activity";
 
-// Active garden lives in localStorage; re-read it when this tab or another
-// one changes it.
+// Event fired when the dashboard's selected garden changes
 const SELECTED_EVENT = "smart-agri:selected-garden";
+// Re-run the listener when the selected garden changes (this or another tab)
 function subscribeSelected(listener: () => void) {
   const onStorage = (event: StorageEvent) => {
     if (event.key === SELECTED_GARDEN_STORAGE_KEY) listener();
@@ -130,10 +132,10 @@ function subscribeSelected(listener: () => void) {
   };
 }
 
+// Valid tab names, used to check ?tab= from the URL
 const TABS: Tab[] = ["overview", "pots", "devices", "activity"];
 
-// Reading search params means this part renders on the client only, so it
-// sits inside Suspense (see Next's useSearchParams prerendering notes).
+// Page entry; Suspense is needed because the page reads URL search params
 export default function GardenDetailsPage() {
   return (
     <Suspense fallback={<DetailsLoading />}>
@@ -142,6 +144,7 @@ export default function GardenDetailsPage() {
   );
 }
 
+// Main page body: header, stats, tabs and side panels for one garden
 function GardenDetails() {
   const { confirm, toast } = useFeedback();
   const { id } = useParams<{ id: string }>();
@@ -150,11 +153,13 @@ function GardenDetails() {
   const linkedTab = searchParams.get("tab") as Tab | null;
   const focusPotId = searchParams.get("pot");
   const router = useRouter();
+  // Load the garden, and its live data every 3 s
   const { data: garden, error, mutate } = useSWR<GardenDetail>(id ? `/api/gardens/${id}` : null);
   const { data: activity, mutate: mutateActivity } = useSWR<GardenActivity>(
     id ? `/api/gardens/${id}/dashboard` : null,
     { refreshInterval: 3000 },
   );
+  // Which garden is shown on the dashboard (kept in localStorage)
   const selectedId = useSyncExternalStore(subscribeSelected, getSelectedGardenId, () => null);
   const [tab, setTab] = useState<Tab>(() =>
     linkedTab && TABS.includes(linkedTab) ? linkedTab : focusPotId ? "pots" : "overview",
@@ -166,11 +171,11 @@ function GardenDetails() {
   const [addingPlanting, setAddingPlanting] = useState(false);
   // Devices are only added from a pot, and connected to it.
   const [addingDeviceFor, setAddingDeviceFor] = useState<{ id: string; label: string } | null>(null);
-  // Real boards are added through the guide (find -> choose pot -> press BOOT);
-  // addingDeviceFor is the key-based fallback for the simulator.
+  // Pot that the "Add device" guide is open for (real boards)
   const [guideForPot, setGuideForPot] = useState<{ id: string; label: string } | null>(null);
   const [editingPot, setEditingPot] = useState<EditablePot | null>(null);
 
+  // Garden not found
   if (error) {
     return (
       <Card className="mx-auto max-w-lg py-10 text-center">
@@ -191,25 +196,29 @@ function GardenDetails() {
   const alerts = activity?.alerts ?? [];
   const online = devices.filter((device) => device.status === "ONLINE").length;
   const pumpsOn = pots.filter((pot) => pot.pumpState === "on").length;
-  // Soil probes across this garden's boards: set up vs. actually reading now.
+  // Soil probes in this garden: how many are set up vs. reading now
   const probeTotal = devices.reduce((sum, device) => sum + (device.portCount ?? 1), 0);
   const probesReading = devices
     .filter((device) => device.status === "ONLINE" || device.status === "STALE")
     .reduce((sum, device) => sum + (device.portStatus ?? []).filter((p) => p.port <= (device.portCount ?? 1) && p.moisture != null).length, 0);
   const hasCoordinates = garden.lat != null && garden.lng != null;
+  // Pot name for an ID (or "Garden" if not found)
   const potLabel = (potId: string | null) => pots.find((pot) => pot.id === potId)?.label ?? "Garden";
 
+  // Make this garden the one shown on the dashboard
   function activate() {
     setSelectedGardenId(garden!.id);
     window.dispatchEvent(new Event(SELECTED_EVENT));
   }
 
+  // Open the edit panel filled with the garden's current values
   function openEdit() {
     setFormError("");
     setForm(gardenToForm(garden!));
     setEditing(true);
   }
 
+  // Save the edited garden
   async function save(e: React.FormEvent) {
     e.preventDefault();
     setFormError("");
@@ -227,6 +236,7 @@ function GardenDetails() {
     }
   }
 
+  // Ask to confirm, then delete one pot
   async function removePot(pot: GardenActivity["pots"][number]) {
     const ok = await confirm({
       title: `Delete ${pot.label}?`,
@@ -245,6 +255,7 @@ function GardenDetails() {
     }
   }
 
+  // Ask to confirm, then delete the whole garden
   async function remove() {
     const ok = await confirm({
       title: `Delete “${garden!.name}”?`,
@@ -262,6 +273,7 @@ function GardenDetails() {
     }
   }
 
+  // Tab buttons with their counts
   const tabs: { key: Tab; label: string; count?: number }[] = [
     { key: "overview", label: "Overview" },
     { key: "pots", label: "Pots", count: garden._count.pots },
@@ -382,6 +394,7 @@ function GardenDetails() {
         ))}
       </div>
 
+      {/* Overview tab: location map and weather */}
       {tab === "overview" ? (
         <div className="space-y-5">
 
@@ -438,6 +451,7 @@ function GardenDetails() {
         </div>
       ) : null}
 
+      {/* Pots tab: pot cards and "add pot" */}
       {tab === "pots" ? (
         !activity ? (
           <SkeletonGrid />
@@ -490,6 +504,7 @@ function GardenDetails() {
         )
       ) : null}
 
+      {/* Devices tab: device cards */}
       {tab === "devices" ? (
         !activity ? (
           <SkeletonGrid />
@@ -531,10 +546,12 @@ function GardenDetails() {
         )
       ) : null}
 
+      {/* Activity tab: timeline */}
       {tab === "activity" ? (
         <ActivityTimeline activity={activity} potLabel={potLabel} onChange={mutateActivity} gardenId={garden.id} />
       ) : null}
 
+      {/* Side panels: add pot, add device, edit pot, edit garden */}
       <AddPlantingPanel
         open={addingPlanting}
         onClose={() => setAddingPlanting(false)}
@@ -622,8 +639,10 @@ function GardenDetails() {
   );
 }
 
+// Kinds of events in the activity timeline
 type ActivityKind = "warning" | "watering" | "disease";
 
+// One row in the activity timeline
 interface ActivityItem {
   id: string;
   kind: ActivityKind;
@@ -667,6 +686,7 @@ function ActivityTimeline({
     );
   }
 
+  // Build timeline rows from open alerts, then resolved alerts, watering and disease
   const severe = (severity: string) => severity === "critical" || severity === "high";
   const open: ActivityItem[] = activity.alerts.map((alert) => ({
     id: `open-${alert.id}`,
@@ -708,6 +728,7 @@ function ActivityTimeline({
     })),
   ].sort((a, b) => (b.at ?? "").localeCompare(a.at ?? ""));
 
+  // Apply the filter and count each kind for the chips
   const all = [...open, ...history];
   const items = (filter === "all" ? all : all.filter((item) => item.kind === filter)).slice(0, 20);
   const count = (kind: ActivityKind) => all.filter((item) => item.kind === kind).length;
@@ -718,6 +739,7 @@ function ActivityTimeline({
     { key: "disease", label: "Disease", count: count("disease") },
   ];
 
+  // Mark one open alert as resolved
   async function resolve(alertId: string) {
     setBusy(alertId);
     try {
@@ -823,6 +845,7 @@ function ActionsMenu({
   const close = useCallback(() => setOpen(false), []);
   useDismiss(open, close, rootRef, triggerRef);
 
+  // Close the menu, then do the chosen action
   function run(action: () => void) {
     setOpen(false);
     action();
@@ -927,12 +950,13 @@ function AttentionMenu({
       ? `${count} ${count === 1 ? "thing needs" : "things need"} attention`
       : "Nothing needs attention";
 
+  // Mark one or all alerts resolved (hidden right away, then saved)
   async function resolve(targets: GardenActivity["alerts"]) {
     setError("");
     setBusy(targets.length > 1 ? "all" : targets[0].id);
     const ids = new Set(targets.map((alert) => alert.id));
     try {
-      // Optimistically drop them from the list while the server records it.
+      // Hide them from the list right away while the server saves it
       await onChange(
         async (current) => {
           await Promise.all(
@@ -961,6 +985,7 @@ function AttentionMenu({
     }
   }
 
+  // Undo the last "mark resolved"
   async function undo() {
     if (!lastResolved) return;
     const targets = lastResolved;
@@ -1082,6 +1107,7 @@ function AttentionMenu({
   );
 }
 
+// Weather panel: current conditions and a short forecast
 function WeatherSummary({
   activity,
   hasCoordinates,
@@ -1154,6 +1180,7 @@ function WeatherSummary({
   );
 }
 
+// Colours for each plant health status
 const HEALTH_PILL: Record<string, string> = {
   healthy: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300",
   diseased: "bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-300",
@@ -1172,6 +1199,7 @@ function useNow(intervalMs = 15000) {
   return now;
 }
 
+// Card for one pot: plant, moisture bar, device and pump state
 function PotCard({
   pot,
   devices,
@@ -1193,20 +1221,21 @@ function PotCard({
   highlighted?: boolean;
 }) {
   const cardRef = useRef<HTMLElement>(null);
+  // Scroll to this pot when it was linked to
   useEffect(() => {
     if (highlighted) cardRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
   }, [highlighted]);
   const now = useNow();
-  // A connected sensor reports every 5 s. If it's online but its last soil
-  // reading is old, the probe isn't giving valid readings (loose wire).
+  // Online board but reading older than 60 s means the probe isn't working
   const sensorOnline = pot.sensors.some((sensor) => sensor.status === "ONLINE");
   const readingAgeMs = pot.moistureRecordedAt ? now - new Date(pot.moistureRecordedAt).getTime() : Infinity;
   const probeFault = sensorOnline && readingAgeMs > 60_000;
-  // No sensor: nothing is measuring this pot, so don't present the old value as current.
+  // No device: don't show the old value as if it were current
   const noSensor = pot.sensors.length === 0;
   const moisture = probeFault || noSensor ? null : pot.currentMoisture;
   const low = pot.moistureOnThreshold;
   const high = Math.max(pot.moistureOffThreshold ?? low, low);
+  // Text and colours for the moisture status
   const state =
     noSensor
       ? { text: "No device", tone: "text-slate-400", bar: "bg-slate-300" }
@@ -1233,7 +1262,7 @@ function PotCard({
           : "border-slate-200 dark:border-slate-800"
       }`}
     >
-      {/* Who */}
+      {/* Pot name, plant and health */}
       <header className="flex items-start gap-3 p-4 pb-3">
         <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400">
           <Flower2 size={19} />
@@ -1262,7 +1291,7 @@ function PotCard({
         />
       </header>
 
-      {/* Moisture */}
+      {/* Moisture value and bar */}
       <div className="px-4">
         <div className="flex items-end justify-between">
           <p className="text-3xl font-black leading-none">
@@ -1300,6 +1329,7 @@ function PotCard({
         </p>
       </div>
 
+      {/* Warning when the probe isn't giving readings */}
       {probeFault ? (
         <p className="mx-4 mt-2 rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:bg-rose-500/10 dark:text-rose-300">
           The board is online but its soil probe isn&apos;t giving valid readings
@@ -1308,10 +1338,10 @@ function PotCard({
         </p>
       ) : null}
 
-      {/* Sensor */}
+      {/* Connected device */}
       <PotSensor pot={pot} devices={devices} onChange={onChange} onAddDevice={onAddDevice} />
 
-      {/* Watering */}
+      {/* Pump state and watering mode */}
       <footer className="mt-auto flex items-center gap-2 border-t border-slate-100 px-4 py-2.5 text-xs dark:border-slate-800">
         <span
           className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-semibold ${
@@ -1353,6 +1383,7 @@ function PotMenu({
   useDismiss(open, close, rootRef, triggerRef);
   const item =
     "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800";
+  // Close the menu, then do the chosen action
   const run = (action: () => void) => {
     setOpen(false);
     action();
@@ -1424,8 +1455,7 @@ function PotSensor({
   useDismiss(open, close, rootRef, triggerRef);
 
   const connectedIds = new Set(pot.sensors.map((sensor) => sensor.id));
-  // Boards in this garden — or not in a garden yet (they join it) — that still
-  // have a free port (each port serves one pot).
+  // Load all boards, to find free ports for this pot
   const { data: allDevices } = useSWR<
     {
       id: string;
@@ -1438,8 +1468,7 @@ function PotSensor({
       pots: { id: string; label: string; port: number }[];
     }[]
   >("/api/devices");
-  // Each board's free ports, plus the next new port where the board can grow
-  // (firmware 2.9+, up to 6). This garden's boards, or ones not in a garden yet.
+  // Boards (this garden or none) with a free port or room for a new one
   const available = (allDevices ?? [])
     .filter((device) => !connectedIds.has(device.id))
     .filter((device) => !device.gardenId || devices.some((d) => d.id === device.id))
@@ -1462,6 +1491,7 @@ function PotSensor({
       ]
     : [];
 
+  // Move this pot to another port on the same board
   async function moveTo(port: number) {
     if (!board || !primary) return;
     setOpen(false);
@@ -1481,6 +1511,7 @@ function PotSensor({
 
   const { confirm, toast } = useFeedback();
 
+  // Connect (POST) or disconnect (DELETE) a device port for this pot
   async function change(method: "POST" | "DELETE", deviceId: string, port?: number) {
     setOpen(false);
     const deviceName = [...pot.sensors, ...available].find((device) => device.id === deviceId)?.name ?? "the device";
@@ -1524,6 +1555,7 @@ function PotSensor({
   return (
     <div className="px-4 pb-3 pt-3">
       <div ref={rootRef} className="relative">
+        {/* Connected device row, or a "Connect a device" button */}
         {primary ? (
           <div className="flex items-center gap-2.5 rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-800">
             <span className="relative grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-300">
@@ -1573,6 +1605,7 @@ function PotSensor({
           </button>
         )}
 
+        {/* Menu: add device, pick a free port, move or disconnect */}
         {open ? (
           <div
             role="menu"
@@ -1690,8 +1723,10 @@ function PotSensor({
   );
 }
 
+// Most ports one board supports
 const MAX_PORTS = 6;
 
+// Card for one board: status and what's on each of its ports
 function DeviceCard({
   device,
   onConnect,
@@ -1836,6 +1871,7 @@ function Meta({ icon: Icon, label, value }: { icon: LucideIcon; label: string; v
   );
 }
 
+// White card section with an optional title
 function Panel({
   title,
   description,
@@ -1860,6 +1896,7 @@ function Panel({
   );
 }
 
+// Green button with an icon
 function AddButton({ onClick, icon: Icon, children }: { onClick: () => void; icon: LucideIcon; children: ReactNode }) {
   return (
     <button
@@ -1873,6 +1910,7 @@ function AddButton({ onClick, icon: Icon, children }: { onClick: () => void; ico
   );
 }
 
+// Green text link
 function SectionLink({ href, children }: { href: string; children: ReactNode }) {
   return (
     <Link href={href} className="text-sm font-semibold text-emerald-600 hover:underline dark:text-emerald-400">
@@ -1881,6 +1919,7 @@ function SectionLink({ href, children }: { href: string; children: ReactNode }) 
   );
 }
 
+// Clickable number tile in the stats row
 function Stat({
   icon: Icon,
   label,
@@ -1914,6 +1953,7 @@ function Stat({
   );
 }
 
+// One weather value (rain, humidity, wind)
 function WeatherFact({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: string }) {
   return (
     <div className="px-2 py-3">
@@ -1924,6 +1964,7 @@ function WeatherFact({ icon: Icon, label, value }: { icon: LucideIcon; label: st
   );
 }
 
+// Icon, title and text shown when there's nothing to list
 function EmptyState({
   icon: Icon,
   title,
@@ -1947,6 +1988,7 @@ function EmptyState({
   );
 }
 
+// Grey placeholder rows while loading
 function SkeletonRows({ rows = 3 }: { rows?: number }) {
   return (
     <div className="space-y-3" aria-hidden="true">
@@ -1957,6 +1999,7 @@ function SkeletonRows({ rows = 3 }: { rows?: number }) {
   );
 }
 
+// Grey placeholder cards while loading
 function SkeletonGrid() {
   return (
     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3" aria-hidden="true">
@@ -1967,6 +2010,7 @@ function SkeletonGrid() {
   );
 }
 
+// Placeholder for the whole page while the garden loads
 function DetailsLoading() {
   return (
     <div className="mx-auto max-w-6xl" aria-live="polite">
@@ -1982,14 +2026,17 @@ function DetailsLoading() {
   );
 }
 
+// Date in Bangladesh time
 function formatDate(value: string) {
   return new Intl.DateTimeFormat("en-BD", { dateStyle: "medium", timeZone: "Asia/Dhaka" }).format(new Date(value));
 }
 
+// Time in Bangladesh time
 function formatTime(value: string) {
   return new Intl.DateTimeFormat("en-BD", { timeStyle: "short", timeZone: "Asia/Dhaka" }).format(new Date(value));
 }
 
+// Date and time in Bangladesh time
 function formatDateTime(value: string) {
   return new Intl.DateTimeFormat("en-BD", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Dhaka" }).format(
     new Date(value),

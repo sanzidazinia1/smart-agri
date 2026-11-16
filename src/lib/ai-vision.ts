@@ -1,12 +1,11 @@
-// Online vision AI for leaf diagnosis: Google Gemini or Groq (Llama 4 vision).
-// Both get the same prompt and must answer with the same JSON, which is mapped
-// onto the AiPrediction the local model returns — so the report, history,
-// alerts and home remedies work the same whichever engine diagnosed the leaf.
+// Diagnoses leaf photos with online AI (Gemini or Groq) in the local model's format
 import { z } from "zod";
 import type { AiPrediction } from "@/lib/ai";
 
+// The online AI services a user can choose
 export type OnlineProvider = "GEMINI" | "GROQ";
 
+// Display name, default model and API key help for each online AI
 export const PROVIDER_INFO: Record<OnlineProvider, { name: string; defaultModel: string; keyUrl: string; keyHint: string }> = {
   GEMINI: {
     name: "Google Gemini",
@@ -22,10 +21,7 @@ export const PROVIDER_INFO: Record<OnlineProvider, { name: string; defaultModel:
   },
 };
 
-/**
- * Keys the app's home-remedy plans know (lib/home-remedies): the AI picks the
- * closest one so "Do this today" and the home remedies fit its diagnosis.
- */
+// Home-remedy plan keys the AI must choose from so remedies match its diagnosis
 export const PLAN_KEYS = [
   "healthy",
   "early_blight",
@@ -45,6 +41,7 @@ export const PLAN_KEYS = [
   "care_problem",
 ] as const;
 
+// Instructions sent to the AI: how to diagnose and the exact JSON to return
 const SYSTEM = `You are an expert plant pathologist helping a home gardener.
 You look at ONE photo of a plant leaf and diagnose it. Be honest: if the photo
 is not a plant, is blurry, or you can't tell, say so (uncertain: true).
@@ -71,12 +68,14 @@ Answer ONLY with JSON, no markdown, in exactly this shape:
   "uncertain": boolean
 }`;
 
+// The question sent with the photo, mentioning the pot's plant if known
 function userPrompt(plantName: string | null) {
   return plantName
     ? `This leaf is from the gardener's pot, which they say grows: ${plantName}. If the photo clearly shows a different plant, say so in "plantSeen". Diagnose the leaf.`
     : "Diagnose this leaf.";
 }
 
+// Checks the AI's JSON and fills safe defaults for missing or bad fields
 const resultSchema = z.object({
   isPlant: z.boolean().catch(true),
   plantSeen: z.string().catch(""),
@@ -99,7 +98,7 @@ const resultSchema = z.object({
   uncertain: z.boolean().catch(false),
 });
 
-/** The JSON object in a model reply (tolerates ```json fences or text around it). */
+// Pulls the JSON object out of an AI reply, even if wrapped in ``` or text
 export function extractJson(text: string): unknown {
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
   const body = fenced ? fenced[1] : text;
@@ -109,7 +108,7 @@ export function extractJson(text: string): unknown {
   return JSON.parse(body.slice(start, end + 1));
 }
 
-/** Map the AI's JSON onto the same shape the local model returns. */
+// Converts the AI's JSON into the same result shape the local model returns
 export function toPrediction(raw: unknown, provider: OnlineProvider, model: string, plantName: string | null): AiPrediction & { summary?: string } {
   const r = resultSchema.parse(raw);
   const planKey = (PLAN_KEYS as readonly string[]).includes(r.planKey) ? r.planKey : "other_fungal";
@@ -149,6 +148,7 @@ export function toPrediction(raw: unknown, provider: OnlineProvider, model: stri
   };
 }
 
+// Reads the error message from a failed AI response
 async function readError(res: Response) {
   const body = await res.text().catch(() => "");
   try {
@@ -161,7 +161,7 @@ async function readError(res: Response) {
   return body.slice(0, 200) || res.statusText;
 }
 
-/** Turns provider errors into something a gardener can act on. */
+// Turns AI service errors into simple messages a gardener can act on
 function friendly(provider: OnlineProvider, status: number, message: string) {
   const name = PROVIDER_INFO[provider].name;
   if (status === 401 || status === 403 || /api key not valid|invalid api key|permission/i.test(message)) {
@@ -174,6 +174,7 @@ function friendly(provider: OnlineProvider, status: number, message: string) {
   return `${name} error (${status}): ${message}`;
 }
 
+// Sends a request to Google Gemini and returns its text reply
 async function callGemini(key: string, model: string, parts: unknown[], json: boolean) {
   const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
     method: "POST",
@@ -192,6 +193,7 @@ async function callGemini(key: string, model: string, parts: unknown[], json: bo
   return text;
 }
 
+// Sends a request to Groq and returns its text reply
 async function callGroq(key: string, model: string, content: unknown, json: boolean): Promise<string> {
   const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
@@ -210,7 +212,7 @@ async function callGroq(key: string, model: string, content: unknown, json: bool
   });
   if (!res.ok) {
     const message = await readError(res);
-    // Some models don't support JSON mode: ask again without it (the prompt still asks for JSON).
+    // Some models lack JSON mode, so retry without it (prompt still asks JSON)
     if (json && res.status === 400 && /response_format|json/i.test(message)) return callGroq(key, model, content, false);
     throw new Error(friendly("GROQ", res.status, message));
   }
@@ -220,7 +222,7 @@ async function callGroq(key: string, model: string, content: unknown, json: bool
   return text;
 }
 
-/** Diagnose a leaf photo with Gemini or Groq. */
+// Diagnoses a leaf photo with Gemini or Groq
 export async function diagnoseOnline(input: {
   provider: OnlineProvider;
   apiKey: string;
@@ -253,7 +255,7 @@ export async function diagnoseOnline(input: {
   return toPrediction(raw, input.provider, model, input.plantName);
 }
 
-/** Cheap check that the key + model work (text only, no image). */
+// Quick check that the API key and model work (text only, no image)
 export async function testOnline(input: { provider: OnlineProvider; apiKey: string; model?: string | null }) {
   const model = input.model?.trim() || PROVIDER_INFO[input.provider].defaultModel;
   const ask = 'Reply with exactly this JSON: {"ok": true}';

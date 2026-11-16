@@ -1,23 +1,17 @@
-// Bridge from Next.js API routes to the Python FastAPI disease-detection service.
+// Talks to the local Python AI service that detects plant diseases from leaf photos
 
-// Default to 127.0.0.1 (IPv4) rather than "localhost": Node's fetch may resolve
-// localhost to IPv6 (::1) while the FastAPI service binds IPv4, which surfaces
-// as "Disease detection service is unavailable".
+// AI service address; 127.0.0.1 not "localhost" to avoid IPv6 connection errors
 const AI_SERVICE_URL = (process.env.AI_SERVICE_URL || "http://127.0.0.1:8001").replace(/\/+$/, "");
 
-/**
- * Is the local model (Python AI service) usable here? Locally it runs next to
- * the app; on the live site (Vercel) only if AI_SERVICE_URL points to a hosted
- * copy. Without it, Disease AI needs Gemini or Groq (Settings → Disease AI).
- */
+// True if the local AI can be used (always locally; on Vercel only if URL is set)
 export function localAiAvailable() {
   return Boolean(process.env.AI_SERVICE_URL) || !process.env.VERCEL;
 }
-// Optional shared secret for a publicly hosted AI service (must match the
-// service's AI_SERVICE_TOKEN). /health stays public.
+// Optional secret token for a hosted AI service (/health stays public)
 const AI_SERVICE_TOKEN = process.env.AI_SERVICE_TOKEN;
 const authHeaders = (): Record<string, string> => (AI_SERVICE_TOKEN ? { "x-ai-token": AI_SERVICE_TOKEN } : {});
 
+// Treatment steps grouped by type
 export interface AiTreatment {
   immediate: string[];
   organic: string[];
@@ -25,6 +19,7 @@ export interface AiTreatment {
   prevention: string[];
 }
 
+// The diagnosis result returned by the AI for one leaf photo
 export interface AiPrediction {
   disease: string;
   crop: string;
@@ -35,25 +30,23 @@ export interface AiPrediction {
   treatment: AiTreatment;
   recommendation: string;
   modelVersion: string;
-  /** Next most likely answers (within the pot's crop when known). */
+  // Next most likely answers (within the pot's crop when known)
   alternatives?: { disease: string; className: string; confidence: number }[];
-  /** The model isn't sure: low confidence, close runner-up, or the photo doesn't look like the crop. */
+  // True when the model isn't sure (low confidence or photo doesn't match)
   uncertain?: boolean;
-  /** The crop the answer was limited to (the pot's plant), if any. */
+  // The crop the answer was limited to (the pot's plant), if any
   restrictedTo?: string | null;
-  /** The crop the photo looked most like before limiting, e.g. "peach". */
+  // The crop the photo looked most like before limiting, e.g. "peach"
   lookedLike?: string | null;
-  /** Share of the model's belief on the pot's crop (0–1); low = doesn't look like it. */
+  // How much the photo looks like the pot's crop (0–1); low = not like it
   cropMatch?: number | null;
 }
 
-/** The extra detail stored with each scan (reopened from history). */
-export type PredictionDetails = Pick<AiPrediction, "alternatives" | "uncertain" | "restrictedTo" | "lookedLike" | "cropMatch">;
-
+// Sends a leaf photo to the local AI service and returns its diagnosis
 export async function analyzeLeafImage(
   file: Blob,
   filename = "leaf.jpg",
-  /** The pot's crop as the model names it ("tomato"): only its diseases are considered. */
+  // The pot's crop (e.g. "tomato"): only its diseases are considered
   crop?: string | null,
 ): Promise<AiPrediction> {
   const form = new FormData();
@@ -76,6 +69,7 @@ export async function analyzeLeafImage(
   return (await res.json()) as AiPrediction;
 }
 
+// Checks if the local AI service is running; returns null if not
 export async function aiServiceHealth(): Promise<{
   status: string;
   labels: number;
@@ -92,8 +86,7 @@ export async function aiServiceHealth(): Promise<{
   }
 }
 
-// Map the AI severity + confidence to a 0–100 health-score contribution
-// (healthy => 100; worse disease/severity => lower).
+// Turns a diagnosis into a 0–100 health score (healthy = 100, worse = lower)
 export function healthContributionFromPrediction(p: AiPrediction): number {
   const isHealthy =
     p.className.toLowerCase().includes("healthy") ||

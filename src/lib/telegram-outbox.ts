@@ -1,4 +1,5 @@
 import "server-only";
+// Sends queued Telegram alerts, retrying failures and dropping old ones
 
 import type { TelegramDelivery } from "@prisma/client";
 import { prisma } from "@/lib/db";
@@ -6,35 +7,37 @@ import { type TelegramSendResult } from "@/lib/telegram";
 import { sendTelegramForUser } from "@/lib/telegram-settings";
 export { enqueueTelegramDelivery, type EnqueueTelegramDelivery } from "@/lib/telegram-delivery-enqueue";
 
+// Retry limits and timings for sending messages
 export const MAX_DELIVERY_ATTEMPTS = 6;
 export const DELIVERY_LEASE_MS = 60_000;
 export const DEFAULT_WORKER_BATCH_SIZE = 10;
-/**
- * Alerts older than this are dropped instead of sent: an "irrigation started"
- * message from yesterday is noise, and a long outage (or Telegram being set up
- * for the first time) would otherwise flood the chat with a backlog.
- */
+// Alerts older than 6 hours are dropped so the chat isn't flooded with old news
 export const MAX_DELIVERY_AGE_MS = 6 * 60 * 60 * 1000;
 export const EXPIRED_ERROR_CODE = "EXPIRED";
 
+// Wait before the next retry: doubles each time (max 1 h), with some randomness
 export function calculateRetryDelayMs(attemptCount: number, random = Math.random()) {
   const exponential = Math.min(60 * 60_000, 30_000 * 2 ** Math.max(0, attemptCount - 1));
-  // Keep retry bursts from synchronizing while remaining bounded and testable.
+  // Random spread so many retries don't all fire at once
   return Math.round(exponential * (0.75 + Math.max(0, Math.min(1, random)) * 0.5));
 }
 
+// Short error code saved for a failed send
 export function errorCodeForTelegramResult(result: Exclude<TelegramSendResult, { ok: true }>) {
   return result.providerCode ?? result.reason.toUpperCase();
 }
 
+// True if retrying won't help (bad setup or Telegram rejected the request)
 export function isPermanentTelegramFailure(result: Exclude<TelegramSendResult, { ok: true }>) {
   if (result.reason === "configuration" || result.reason === "invalid-message") return true;
-  // Telegram 4xx errors other than rate limits are not helped by retrying.
+  // Telegram 4xx errors (except rate limits) won't be fixed by retrying
   return /^(HTTP|API)_(400|401|403|404)$/.test(result.providerCode ?? "");
 }
 
+// The database part this file needs (lets tests pass a fake)
 type DeliveryStore = Pick<typeof prisma, "telegramDelivery">;
 
+// Picks messages that are due and locks them so only one worker sends each
 export async function claimDueTelegramDeliveries(
   store: DeliveryStore = prisma,
   options: { now?: Date; limit?: number; leaseMs?: number; userId?: string } = {},
@@ -42,7 +45,7 @@ export async function claimDueTelegramDeliveries(
   const now = options.now ?? new Date();
   const limit = Math.max(1, Math.min(options.limit ?? DEFAULT_WORKER_BATCH_SIZE, 25));
   const leaseExpiresAt = new Date(now.getTime() + (options.leaseMs ?? DELIVERY_LEASE_MS));
-  // Expire stale backlog first so it is never claimed.
+  // Expire old messages first so they are never sent
   await store.telegramDelivery.updateMany({
     where: { status: "PENDING", createdAt: { lt: new Date(now.getTime() - MAX_DELIVERY_AGE_MS) } },
     data: { status: "FAILED", lastErrorCode: EXPIRED_ERROR_CODE, leaseExpiresAt: null },
@@ -62,8 +65,7 @@ export async function claimDueTelegramDeliveries(
   const claimed: TelegramDelivery[] = [];
   for (const candidate of candidates) {
     if (claimed.length === limit) break;
-    // The conditional update is the atomic claim. A concurrent worker will
-    // observe count=0 once another worker has changed the row to PROCESSING.
+    // Only one worker can flip it to PROCESSING, so no message is sent twice
     const updated = await store.telegramDelivery.updateMany({
       where: {
         id: candidate.id,
@@ -86,10 +88,11 @@ export async function claimDueTelegramDeliveries(
   return claimed;
 }
 
+// Sends one message and marks it sent, retry later, or failed
 export async function processTelegramDelivery(
   delivery: TelegramDelivery,
   store: DeliveryStore = prisma,
-  /** Tests inject a sender; by default each delivery uses its owner's bot. */
+  // Tests pass a fake sender; normally the owner's own bot is used
   send?: (text: string) => Promise<TelegramSendResult>,
   now = new Date(),
 ) {
@@ -126,6 +129,7 @@ export async function processTelegramDelivery(
   return { status: terminal ? "failed" as const : "retry" as const, errorCode };
 }
 
+// Sends one batch of due messages and counts the results
 export async function runTelegramDeliveryWorker(
   store: DeliveryStore = prisma,
   send?: (text: string) => Promise<TelegramSendResult>,
@@ -142,11 +146,7 @@ export async function runTelegramDeliveryWorker(
   };
 }
 
-/**
- * Drains a bounded number of due batches. This is used by the short-lived
- * Render Cron process so a backlog does not take one five-minute run per ten
- * rows. The bound keeps a bad backlog from making a cron run unbounded.
- */
+// Sends batches until none are left (max 50 batches), used by the cron job
 export async function runTelegramDeliveryWorkerUntilIdle(
   store: DeliveryStore = prisma,
   send?: (text: string) => Promise<TelegramSendResult>,

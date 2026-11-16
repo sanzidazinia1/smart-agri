@@ -1,20 +1,20 @@
-// Completing a device claim — shared by the pairing-code path
-// (/api/devices/pairing) and the button-press path (/api/iot/pair).
+// Adds a board to a user's account (used by pairing code and button-press pairing)
 import { prisma } from "@/lib/db";
 import { generateDeviceKey } from "@/lib/device-key";
 import { KEY_DELIVERY_TTL_MS } from "@/lib/device-pairing";
 import { createAppNotification } from "@/lib/notify";
 
+// Who is claiming the board and where it should go
 export interface ClaimTarget {
   hardwareId: string;
   userId: string;
-  /** Optional: a board can be added now and placed in a garden later. */
+  // Optional: a board can be added now and placed in a garden later
   gardenId: string | null;
   potId?: string | null;
   name: string;
 }
 
-/** One sensor per pot: the device already connected to this pot, if it isn't `deviceId`. */
+// Name of another board already on this pot (one sensor per pot), or null
 export async function otherDeviceOnPot(potId: string, deviceId?: string | null) {
   const mapping = await prisma.devicePotMapping.findFirst({
     where: { potId, ...(deviceId ? { deviceId: { not: deviceId } } : {}) },
@@ -23,7 +23,7 @@ export async function otherDeviceOnPot(potId: string, deviceId?: string | null) 
   return mapping?.device.name ?? null;
 }
 
-/** Returns an error message if the user can't claim this board into that garden/pot. */
+// Returns an error message if the user can't claim this board there, else null
 export async function claimTargetError(target: ClaimTarget) {
   if (target.potId && !target.gardenId) return "Choose the pot's garden too";
   if (target.gardenId) {
@@ -45,11 +45,7 @@ export async function claimTargetError(target: ClaimTarget) {
   return null;
 }
 
-/**
- * Create the Device (or re-key the user's existing one with this hardware ID),
- * connect it to the pot and mark the pairing claimed. With deliverNow the key
- * is returned for immediate hand-over; otherwise it waits for the board.
- */
+// Saves the board with a new key, links it to the pot and marks pairing done
 export async function completeClaim(target: ClaimTarget, { deliverNow }: { deliverNow: boolean }) {
   const { plain, hash } = generateDeviceKey();
   const now = new Date();
@@ -73,7 +69,7 @@ export async function completeClaim(target: ClaimTarget, { deliverNow }: { deliv
           },
           select: { id: true, name: true, hardwareId: true },
         });
-    // (Re)claiming starts fresh: clear old connections; the chosen pot goes on port 1.
+    // Claiming starts fresh: clear old links; the chosen pot goes on port 1
     await tx.devicePotMapping.deleteMany({ where: { deviceId: saved.id } });
     if (target.potId) await tx.devicePotMapping.create({ data: { deviceId: saved.id, potId: target.potId, port: 1 } });
     await tx.devicePairing.update({

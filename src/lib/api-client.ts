@@ -1,5 +1,6 @@
-// Thin client-side helpers for mutating API routes.
+// Small browser helpers to call the app's API routes (POST, PATCH, DELETE, PUT)
 
+// Sends a JSON request and throws the server's error message if it fails
 async function send<T>(url: string, method: string, body?: unknown): Promise<T> {
   const res = await fetch(url, {
     method,
@@ -13,6 +14,7 @@ async function send<T>(url: string, method: string, body?: unknown): Promise<T> 
   return data as T;
 }
 
+// Shortcuts for each HTTP method
 export const apiPost = <T = unknown>(url: string, body?: unknown) =>
   send<T>(url, "POST", body);
 export const apiPatch = <T = unknown>(url: string, body?: unknown) =>

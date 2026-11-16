@@ -1,4 +1,5 @@
 import "server-only";
+// Marks boards offline when they stop sending data and alerts their owners
 
 import { prisma } from "@/lib/db";
 import { formatDeviceOfflineNotification } from "@/lib/business-notifications";
@@ -6,24 +7,30 @@ import { enqueueTelegramDelivery } from "@/lib/telegram-delivery-enqueue";
 import { getDeviceConnectionThresholds } from "@/lib/device-status";
 import { createAppNotification } from "@/lib/notify";
 
-// This is also the server-side observation of the relay fail-safe window.
+// Re-exported; this also matches the board's pump fail-safe time
 export { DEFAULT_DEVICE_OFFLINE_THRESHOLD_SECONDS } from "@/lib/device-status";
+// How many boards to check per run by default
 export const DEFAULT_OFFLINE_MONITOR_BATCH_SIZE = 25;
 
+// The database parts this monitor needs (lets tests pass a fake)
 type MonitoringStore = Pick<typeof prisma, "device" | "$transaction">;
 
+// How long without data before a board counts as offline (ms)
 export function getDeviceOfflineThresholdMs(env: Record<string, string | undefined> = process.env) {
   return getDeviceConnectionThresholds(env).offlineMs;
 }
 
+// Unique key so each offline episode is only reported once
 export function deviceOfflineEventKey(deviceId: string, lastSeenAt: Date) {
   return `device:${deviceId}:offline:${lastSeenAt.toISOString()}`;
 }
 
+// Unique key so each back-online event is only reported once
 export function deviceRecoveryEventKey(deviceId: string, lastSeenAt: Date) {
   return `device:${deviceId}:recovered:${lastSeenAt.toISOString()}`;
 }
 
+// Finds silent online boards, marks them offline and sends alerts
 export async function runDeviceOfflineMonitor(options: {
   now?: Date;
   limit?: number;
@@ -47,8 +54,7 @@ export async function runDeviceOfflineMonitor(options: {
     if (!device.lastSeenAt) continue;
     const lastSeenAt = device.lastSeenAt;
     const result = await store.$transaction(async (tx) => {
-      // This conditional state change is the transition lock: concurrent
-      // scheduler calls can enqueue at most one offline record for an episode.
+      // Only one run can flip it to OFFLINE, so the alert is never sent twice
       const update = await tx.device.updateMany({
         where: { id: device.id, status: "ONLINE", lastSeenAt: { lt: offlineBefore } },
         data: { status: "OFFLINE" },

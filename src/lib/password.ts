@@ -1,6 +1,7 @@
+// Hashes and checks user passwords safely with scrypt
 import crypto from "node:crypto";
 
-// Ported from smartagriai-main backend/src/utils/auth.ts (scrypt-based).
+// Hashes a password with a random salt; returns the hash and the salt
 export function hashPassword(password: string, salt?: string) {
   const passwordSalt = salt || crypto.randomBytes(16).toString("hex");
   const passwordHash = crypto
@@ -9,6 +10,7 @@ export function hashPassword(password: string, salt?: string) {
   return { passwordHash, passwordSalt };
 }
 
+// Checks a password against the saved hash (constant-time compare)
 export function verifyPassword(
   password: string,
   passwordHash: string,

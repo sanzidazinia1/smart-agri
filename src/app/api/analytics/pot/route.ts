@@ -1,9 +1,12 @@
+// API /api/analytics/pot: charts and stats for one pot over a date range
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/api-auth";
 import { resolveAnalyticsDateRange } from "@/lib/pot-analytics";
 import { getPotAnalyticsOverview } from "@/lib/pot-analytics-overview";
 
+// GET: return a pot's analytics for the chosen range (e.g. 7d) or from/to dates
 export async function GET(req: Request) {
+  // Auth check: only logged-in users; returns their user id
   const userId = await requireUser();
   if (userId instanceof NextResponse) return userId;
   const query = new URL(req.url).searchParams;

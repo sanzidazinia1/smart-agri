@@ -1,8 +1,4 @@
-// Connect / disconnect the user's own Telegram bot from Settings.
-// PUT { botToken }: checks the token with Telegram, stores it encrypted, and
-// tries to find the chat straight away (if the user already pressed Start).
-// DELETE: disconnect (keeps the bot, paused) or ?forget=1 (removes it);
-// PATCH: reconnect the saved bot. The token is never returned to the browser.
+// API /api/telegram/settings: connect, pause or remove the user's Telegram bot
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireUser } from "@/lib/api-auth";
@@ -11,9 +7,12 @@ import { openSecret, sealSecret } from "@/lib/secret-box";
 
 export const runtime = "nodejs";
 
+// Validation schema: the bot token from @BotFather
 const schema = z.object({ botToken: z.string().trim().min(1) });
 
+// PUT: check the token with Telegram, save it encrypted, try to find the chat
 export async function PUT(req: Request) {
+  // Auth check: only logged-in users
   const gate = await requireUser();
   if (gate instanceof NextResponse) return gate;
   const parsed = schema.safeParse(await req.json().catch(() => null));
@@ -32,6 +31,7 @@ export async function PUT(req: Request) {
     );
   }
   const chat = await findTelegramChat(token);
+  // Security: the token is stored encrypted and never sent back to the browser
   const data = {
     paused: false,
     botTokenCipher: sealSecret(token),
@@ -43,10 +43,7 @@ export async function PUT(req: Request) {
   return NextResponse.json({ botUsername: bot.username, chatFound: chat.ok, chatName: data.chatName });
 }
 
-/**
- * DELETE: disconnect — alerts stop but the bot stays saved (paused), so it can
- * be reconnected without the token. DELETE ?forget=1 removes the bot for good.
- */
+// DELETE: pause alerts (bot stays saved), or ?forget=1 to remove the bot
 export async function DELETE(req: Request) {
   const gate = await requireUser();
   if (gate instanceof NextResponse) return gate;
@@ -58,7 +55,7 @@ export async function DELETE(req: Request) {
   return NextResponse.json({ success: true, paused: true });
 }
 
-/** PATCH: reconnect the saved bot — checks the token with Telegram again, then resumes alerts. */
+// PATCH: reconnect the saved bot: recheck the token, then resume alerts
 export async function PATCH() {
   const gate = await requireUser();
   if (gate instanceof NextResponse) return gate;

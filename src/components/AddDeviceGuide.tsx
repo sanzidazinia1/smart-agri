@@ -1,8 +1,6 @@
 "use client";
 
-// Step-by-step "Add a device" guide: power the board, connect it to Wi-Fi from
-// a phone, wait for it to appear, choose its pot, then confirm by pressing the
-// board's BOOT button (or typing its pairing code).
+// Step-by-step guide to connect a new ESP32 board and link it to a pot
 import { useEffect, useState } from "react";
 import useSWR from "swr";
 import { Check, Copy, Cpu, Hand, KeyRound, Loader2, Plug, RefreshCw, Smartphone, Wifi } from "lucide-react";
@@ -12,19 +10,23 @@ import { timeAgo } from "@/components/device-ui";
 import { QrCode } from "@/components/QrCode";
 import { apiPost } from "@/lib/api-client";
 
+// A garden the device can be placed in
 export interface GuideGarden {
   id: string;
   name: string;
 }
 
+// A board that has contacted the server and is waiting to be added
 interface FoundBoard {
   hardwareId: string;
   lastSeenAt: string;
   existingName: string | null;
 }
 
+// The steps of the guide, in order
 type Step = "find" | "claim" | "press" | "done";
 
+// Shared styles for inputs and buttons in the guide
 const fieldClass =
   "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950";
 const primary =
@@ -32,6 +34,7 @@ const primary =
 const secondary =
   "rounded-lg border border-slate-300 px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800";
 
+// Side panel that holds the add-device guide
 export function AddDeviceGuide({
   open,
   onClose,
@@ -81,6 +84,7 @@ export function AddDeviceGuide({
   );
 }
 
+// Shows the current step and moves between steps
 function GuideSteps({
   gardens,
   initialHardwareId,
@@ -100,14 +104,17 @@ function GuideSteps({
   onDone: () => void;
   onManual: () => void;
 }) {
+  // Current step, the chosen board and the name it was saved with
   const [step, setStep] = useState<Step>(initialHardwareId ? "claim" : "find");
   const [board, setBoard] = useState<string | null>(initialHardwareId);
   const [claimedName, setClaimedName] = useState("");
 
   return (
     <div className="space-y-5">
+      {/* Step progress bar */}
       <Progress step={step} />
 
+      {/* Step 1: find the board */}
       {step === "find" ? (
         <FindStep
           onPick={(hardwareId) => {
@@ -118,6 +125,7 @@ function GuideSteps({
         />
       ) : null}
 
+      {/* Step 2: choose garden, pot and name */}
       {step === "claim" && board ? (
         <ClaimStep
           hardwareId={board}
@@ -138,6 +146,7 @@ function GuideSteps({
         />
       ) : null}
 
+      {/* Step 3: wait for the BOOT button press */}
       {step === "press" && board ? (
         <PressStep
           hardwareId={board}
@@ -149,6 +158,7 @@ function GuideSteps({
         />
       ) : null}
 
+      {/* Finished */}
       {step === "done" ? (
         <div className="flex flex-col items-center rounded-2xl bg-emerald-50 px-4 py-10 text-center dark:bg-emerald-500/10">
           <span className="grid h-14 w-14 place-items-center rounded-full bg-emerald-600 text-white">
@@ -167,6 +177,7 @@ function GuideSteps({
   );
 }
 
+// Numbered progress bar for the guide steps
 function Progress({ step }: { step: Step }) {
   const steps: { key: Step; label: string }[] = [
     { key: "find", label: "Connect" },
@@ -198,12 +209,15 @@ function Progress({ step }: { step: Step }) {
   );
 }
 
+// Step 1: list boards waiting to be added, plus setup instructions
 function FindStep({ onPick, onManual }: { onPick: (hardwareId: string) => void; onManual: () => void }) {
+  // Waiting boards (checked every 3 s) and this server's address
   const { data: found } = useSWR<FoundBoard[]>("/api/devices/pairing", { refreshInterval: 3000 });
   const { data: info } = useSWR<{ serverUrls: string[] }>("/api/server-info", { revalidateOnFocus: false });
   const serverUrl = info?.serverUrls[0] ?? "";
   const [copied, setCopied] = useState(false);
 
+  // Copy the server address to the clipboard
   async function copy() {
     try {
       await navigator.clipboard.writeText(serverUrl);
@@ -255,6 +269,7 @@ function FindStep({ onPick, onManual }: { onPick: (hardwareId: string) => void; 
           )}
       </section>
 
+      {/* How to set up a new board */}
       <details open={!hasFound} className="group mt-5 rounded-xl border border-slate-200 dark:border-slate-800">
         <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-sm font-bold [&::-webkit-details-marker]:hidden">
           {hasFound ? "Setting up a new board?" : "Set up your board"}
@@ -285,6 +300,7 @@ function FindStep({ onPick, onManual }: { onPick: (hardwareId: string) => void; 
         </Instruction>
       </ol>
       </details>
+      {/* Link to manual setup with a key */}
       <p className="mt-5 border-t border-slate-100 pt-4 text-center text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">
         Using the simulator or other firmware?{" "}
         <button type="button" onClick={onManual} className="font-semibold text-emerald-600 hover:underline dark:text-emerald-400">
@@ -295,6 +311,7 @@ function FindStep({ onPick, onManual }: { onPick: (hardwareId: string) => void; 
   );
 }
 
+// Name of the Wi-Fi network the board creates for setup
 const SETUP_AP = "SmartAgri-Setup";
 // The board's setup page while your phone is on SmartAgri-Setup.
 const SETUP_PAGE = "http://192.168.4.1/wifi";
@@ -302,6 +319,7 @@ const SETUP_PAGE = "http://192.168.4.1/wifi";
 /** One QR at a time: join the board's Wi-Fi, then open its setup page. */
 function QrWalkthrough({ serverUrl }: { serverUrl: string }) {
   const [step, setStep] = useState<1 | 2>(1);
+  // The two QR codes: join the board's Wi-Fi, then open its setup page
   const steps = {
     1: {
       value: `WIFI:T:nopass;S:${SETUP_AP};;`,
@@ -328,6 +346,7 @@ function QrWalkthrough({ serverUrl }: { serverUrl: string }) {
 
   return (
     <span className="mt-3 block rounded-xl border border-slate-200 p-4 dark:border-slate-700">
+      {/* "Scan 1 of 2" and progress dots */}
       <span className="flex items-center justify-between text-xs font-semibold text-slate-500 dark:text-slate-400">
         <span>
           Scan {step} of 2
@@ -338,6 +357,7 @@ function QrWalkthrough({ serverUrl }: { serverUrl: string }) {
           ))}
         </span>
       </span>
+      {/* QR code with title and instructions */}
       <span className="mt-3 flex flex-col items-center text-center">
         {current.value ? (
           <QrCode key={step} value={current.value} size={176} label={`${current.title} QR code`} />
@@ -347,6 +367,7 @@ function QrWalkthrough({ serverUrl }: { serverUrl: string }) {
         <span className="mt-3 block text-sm font-bold text-slate-900 dark:text-white">{current.title}</span>
         <span className="mt-1 block max-w-xs text-xs leading-relaxed text-slate-600 dark:text-slate-300">{current.text}</span>
       </span>
+      {/* Back / Next buttons */}
       <span className="mt-4 flex items-center justify-between">
         {step === 2 ? (
           <button type="button" onClick={() => setStep(1)} className="text-xs font-semibold text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200">
@@ -363,6 +384,7 @@ function QrWalkthrough({ serverUrl }: { serverUrl: string }) {
           <span className="text-xs text-slate-500 dark:text-slate-400">Saved? Your board appears below.</span>
         )}
       </span>
+      {/* Tip for people with only a phone */}
       <span className="mt-4 block rounded-lg bg-slate-50 p-3 text-xs leading-relaxed text-slate-600 dark:bg-slate-800/60 dark:text-slate-300">
         <b className="text-slate-800 dark:text-slate-100">Only have your phone?</b> You can&apos;t scan your own screen — skip the codes: open
         your phone&apos;s <b>Wi-Fi settings</b>, join <b>{SETUP_AP}</b>, and the board&apos;s page opens by itself (if not, open{" "}
@@ -378,6 +400,7 @@ function QrWalkthrough({ serverUrl }: { serverUrl: string }) {
   );
 }
 
+// One numbered instruction row with an icon
 function Instruction({ icon: Icon, title, children }: { icon: typeof Plug; title: string; children: React.ReactNode }) {
   return (
     <li className="flex gap-3">
@@ -392,6 +415,7 @@ function Instruction({ icon: Icon, title, children }: { icon: typeof Plug; title
   );
 }
 
+// Step 2: choose garden, pot and name, then claim the board
 function ClaimStep({
   hardwareId,
   gardens,
@@ -423,12 +447,15 @@ function ClaimStep({
   const [code, setCode] = useState(initialCode ?? "");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  // Pots in the chosen garden
   const { data: pots } = useSWR<{ id: string; label: string; plant: { commonName: string } | null }[]>(
     gardenId ? `/api/pots?gardenId=${gardenId}` : null,
   );
 
+  // The pot to send: the user's choice, or the garden's first pot by default
   const effectivePotId = !gardenId ? "" : potTouched ? potId : potId || pots?.[0]?.id || "";
 
+  // Send the claim to the server; then wait for the button or finish
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
@@ -456,6 +483,7 @@ function ClaimStep({
         <Cpu size={16} className="text-emerald-600 dark:text-emerald-400" />
         Setting up <b className="font-mono">{hardwareId}</b>
       </p>
+      {/* Garden choice */}
       <label className="block">
         <span className="mb-1 flex justify-between text-sm font-bold text-slate-700 dark:text-slate-200">
           Garden <span className="text-xs font-medium text-slate-400">optional</span>
@@ -469,6 +497,7 @@ function ClaimStep({
           ))}
         </select>
       </label>
+      {/* Pot choice */}
       <label className="block">
         <span className="mb-1 flex justify-between text-sm font-bold text-slate-700 dark:text-slate-200">
           Pot it measures and waters <span className="text-xs font-medium text-slate-400">optional</span>
@@ -498,6 +527,7 @@ function ClaimStep({
         </p>
       ) : null}
 
+      {/* Pairing code box (only when using a code) */}
       {useCode ? (
         <label className="block">
           <span className="mb-1 flex items-center gap-1.5 text-sm font-bold text-slate-700 dark:text-slate-200">
@@ -518,6 +548,7 @@ function ClaimStep({
 
       {error ? <p className="text-sm font-bold text-rose-600">{error}</p> : null}
 
+      {/* Submit button and links */}
       <div className="flex flex-col gap-2 pt-1">
         <button type="submit" disabled={saving} className={primary}>
           {saving ? <Loader2 size={16} className="animate-spin" /> : useCode ? <Check size={16} /> : <Hand size={16} />}
@@ -536,16 +567,20 @@ function ClaimStep({
   );
 }
 
+// Step 3: wait for the user to press BOOT on the board
 function PressStep({ hardwareId, onClaimed, onRetry }: { hardwareId: string; onClaimed: () => void; onRetry: () => void }) {
+  // Ask the server every second if the board has been claimed
   const { data } = useSWR<{ state: string; msLeft?: number }>(`/api/devices/pairing?hardwareId=${encodeURIComponent(hardwareId)}`, {
     refreshInterval: 1000,
   });
   const state = data?.state;
 
+  // Finish as soon as the board is claimed
   useEffect(() => {
     if (state === "claimed") onClaimed();
   }, [state, onClaimed]);
 
+  // Seconds left to press the button, and whether time ran out
   const seconds = Math.max(0, Math.round((data?.msLeft ?? 30000) / 1000));
   const expired = state === "available" || state === "not-found";
 

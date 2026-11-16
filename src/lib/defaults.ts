@@ -1,11 +1,13 @@
+// Default values used when a plant or pot has no settings of its own
+
+// Default watering state (pump off, start below 30% moisture)
 export const defaultIrrigation = {
   status: "off" as const,
   manualOverride: false,
   threshold: 30,
 };
 
-// Default soil-moisture comfort band used by the recommendation engine
-// when a plant has no explicit threshold configured.
+// Default comfort ranges for moisture, temperature and humidity
 export const defaultThreshold = {
   soilMoistureMin: 30,
   soilMoistureMax: 70,

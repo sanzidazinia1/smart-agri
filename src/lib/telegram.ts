@@ -1,16 +1,21 @@
 import "server-only";
+// Sends Telegram messages and helps connect a user's bot from Settings
 
+// Telegram API address, request timeout and max message length
 const TELEGRAM_API_BASE_URL = "https://api.telegram.org";
 const DEFAULT_TIMEOUT_MS = 8_000;
 const MAX_TELEGRAM_TEXT_LENGTH = 4_096;
 
+// Any function that works like fetch (tests pass a fake one)
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
+// The bot token and chat that messages go to
 export type TelegramConfig = {
   botToken: string;
   chatId: string;
 };
 
+// Result of sending a message: ok, or the reason it failed
 export type TelegramSendResult =
   | { ok: true; providerMessageId?: string }
   | {
@@ -19,33 +24,34 @@ export type TelegramSendResult =
       providerCode?: string;
     };
 
+// The parts of Telegram's reply we read
 type TelegramApiResponse = {
   ok?: unknown;
   result?: { message_id?: unknown };
   error_code?: unknown;
 };
 
+// Extra options for sending (mainly for tests)
 export type SendTelegramTextOptions = {
-  /** Intended for tests; production callers should use environment configuration. */
+  // Bot and chat to use (default: from env vars)
   config?: TelegramConfig | null;
-  /** Intended for tests; production callers use the platform fetch implementation. */
+  // For tests: a fake fetch
   fetchImpl?: FetchLike;
-  /** Intended for tests; production callers use the bounded default timeout. */
+  // For tests: a custom timeout
   timeoutMs?: number;
 };
 
+// True if the text looks like a Telegram bot token
 function isValidBotToken(value: string) {
   return /^\d{6,}:[A-Za-z0-9_-]{20,}$/.test(value);
 }
 
+// True if the text looks like a chat ID or @channel name
 function isValidChatId(value: string) {
   return /^-?\d+$/.test(value) || /^@[A-Za-z][A-Za-z0-9_]{4,}$/.test(value);
 }
 
-/**
- * Loads only syntactically valid server-side Telegram configuration. Values are
- * deliberately never included in errors or return values.
- */
+// Reads the bot token and chat ID from env vars; null if missing or invalid
 export function getTelegramConfig(
   env: { TELEGRAM_BOT_TOKEN?: string; TELEGRAM_CHAT_ID?: string } = process.env as {
     TELEGRAM_BOT_TOKEN?: string;
@@ -62,11 +68,12 @@ export function getTelegramConfig(
   return { botToken, chatId };
 }
 
+// True if the error came from our timeout cancelling the request
 function isAbortError(error: unknown) {
   return error instanceof DOMException && error.name === "AbortError";
 }
 
-/** Sends a plain-text message to the configured Telegram chat without exposing provider details. */
+// Sends a text message to Telegram and returns ok or a safe failure reason
 export async function sendTelegramText(
   text: string,
   options: SendTelegramTextOptions = {},
@@ -118,20 +125,23 @@ export async function sendTelegramText(
 
 // ---------- Connecting a bot from the Settings page ----------
 
+// Quick format check for a bot token typed into Settings
 export function looksLikeBotToken(value: string) {
   return isValidBotToken(value.trim());
 }
 
+// Result of a simple Telegram API call
 type TelegramCallResult<T> = { ok: true; result: T } | { ok: false; status: number; description?: string };
 
+// Calls a Telegram API method, retrying once if there was no answer
 async function callTelegram<T>(token: string, method: string, fetchImpl: FetchLike = fetch): Promise<TelegramCallResult<T>> {
   const first = await callTelegramOnce<T>(token, method, fetchImpl);
-  // status 0 = the request never got an answer (DNS/TLS/timeout). One quick retry
-  // smooths over a flaky connection before we tell the user Telegram is unreachable.
+  // status 0 = no answer (network/timeout), so try once more
   if (first.ok || first.status !== 0) return first;
   return callTelegramOnce<T>(token, method, fetchImpl);
 }
 
+// Calls a Telegram API method once, with a timeout
 async function callTelegramOnce<T>(token: string, method: string, fetchImpl: FetchLike): Promise<TelegramCallResult<T>> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
@@ -152,17 +162,14 @@ async function callTelegramOnce<T>(token: string, method: string, fetchImpl: Fet
   }
 }
 
-/** Checks a bot token with Telegram and returns the bot's @username. */
+// Checks a bot token with Telegram and returns the bot's @username
 export async function getTelegramBot(token: string, fetchImpl?: FetchLike) {
   const response = await callTelegram<{ username?: string; first_name?: string }>(token, "getMe", fetchImpl);
   if (!response.ok) return { ok: false as const, reason: response.status === 0 ? ("network" as const) : ("invalid-token" as const) };
   return { ok: true as const, username: response.result.username ?? "", name: response.result.first_name ?? "" };
 }
 
-/**
- * Finds the private chat of the latest person who messaged the bot (they
- * pressed Start), so the user never has to look up a chat ID by hand.
- */
+// Finds the chat of the last person who messaged the bot, so no chat ID is typed
 export async function findTelegramChat(token: string, fetchImpl?: FetchLike) {
   type Update = { message?: { chat?: { id?: number; type?: string; first_name?: string; username?: string; title?: string } } };
   const response = await callTelegram<Update[]>(token, "getUpdates", fetchImpl);

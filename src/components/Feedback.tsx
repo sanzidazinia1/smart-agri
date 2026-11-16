@@ -1,16 +1,14 @@
 "use client";
 
-// App-wide feedback: an in-app confirm dialog (replaces window.confirm) and
-// toast notifications. Use via useFeedback():
-//   const { confirm, toast } = useFeedback();
-//   if (await confirm({ title: "Delete pot?", tone: "danger" })) { ... }
-//   toast.success("Saved");
+// App-wide confirm dialog and toast popups, used through useFeedback()
 import { CircleAlert, CircleCheck, Info, TriangleAlert, X } from "lucide-react";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
+// Confirm dialog style: red "danger" or normal
 type Tone = "danger" | "default";
 
+// Options for a confirm dialog
 export interface ConfirmOptions {
   title: string;
   message?: ReactNode;
@@ -19,6 +17,7 @@ export interface ConfirmOptions {
   tone?: Tone;
 }
 
+// One toast popup message
 type ToastKind = "success" | "error" | "info";
 interface ToastItem {
   id: number;
@@ -26,6 +25,7 @@ interface ToastItem {
   message: string;
 }
 
+// What useFeedback() gives to components
 interface FeedbackApi {
   confirm: (options: ConfirmOptions) => Promise<boolean>;
   toast: {
@@ -35,8 +35,10 @@ interface FeedbackApi {
   };
 }
 
+// Shared context that holds the feedback functions
 const FeedbackContext = createContext<FeedbackApi | null>(null);
 
+// Hook to show confirm dialogs and toasts from any component
 export function useFeedback() {
   const api = useContext(FeedbackContext);
   if (!api) throw new Error("useFeedback must be used inside <FeedbackProvider>");
@@ -48,15 +50,20 @@ export function errorMessage(err: unknown, fallback: string) {
   return err instanceof Error && err.message ? err.message : fallback;
 }
 
+// How long each toast kind stays on screen (ms)
 const TOAST_MS = { success: 3500, info: 4000, error: 6000 } as const;
 
+// Provider that renders the dialog and toasts for the whole app
 export function FeedbackProvider({ children }: { children: ReactNode }) {
+  // Open dialog (if any), visible toasts and a counter for toast ids
   const [dialog, setDialog] = useState<(ConfirmOptions & { resolve: (ok: boolean) => void }) | null>(null);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const nextId = useRef(1);
 
+  // Remove one toast
   const dismiss = useCallback((id: number) => setToasts((list) => list.filter((item) => item.id !== id)), []);
 
+  // Add a toast (max 4 shown) and auto-remove it after a delay
   const push = useCallback(
     (kind: ToastKind, message: string) => {
       const id = nextId.current++;
@@ -66,6 +73,7 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
     [dismiss],
   );
 
+  // confirm() returns a promise that resolves when the user answers
   const api = useMemo<FeedbackApi>(
     () => ({
       confirm: (options) => new Promise<boolean>((resolve) => setDialog({ ...options, resolve })),
@@ -78,6 +86,7 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
     [push],
   );
 
+  // Answer the open dialog and close it
   function close(ok: boolean) {
     dialog?.resolve(ok);
     setDialog(null);
@@ -92,11 +101,13 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
   );
 }
 
+// Popup asking the user to confirm or cancel an action
 function ConfirmDialog({ options, onClose }: { options: ConfirmOptions; onClose: (ok: boolean) => void }) {
   const confirmRef = useRef<HTMLButtonElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
   const danger = options.tone === "danger";
 
+  // Focus a button when opened; Escape cancels
   useEffect(() => {
     // Safer default for destructive actions: focus Cancel.
     (danger ? cancelRef : confirmRef).current?.focus();
@@ -116,6 +127,7 @@ function ConfirmDialog({ options, onClose }: { options: ConfirmOptions; onClose:
         aria-labelledby="confirm-title"
         className="animate-fade-in relative w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl dark:border-slate-800 dark:bg-slate-900"
       >
+        {/* Icon, title and message */}
         <div className="flex gap-3">
           <span
             className={`grid h-10 w-10 shrink-0 place-items-center rounded-full ${
@@ -131,6 +143,7 @@ function ConfirmDialog({ options, onClose }: { options: ConfirmOptions; onClose:
             {options.message ? <div className="mt-1 text-sm text-slate-600 dark:text-slate-300">{options.message}</div> : null}
           </div>
         </div>
+        {/* Cancel and confirm buttons */}
         <div className="mt-5 flex justify-end gap-2">
           <button
             ref={cancelRef}
@@ -157,12 +170,14 @@ function ConfirmDialog({ options, onClose }: { options: ConfirmOptions; onClose:
   );
 }
 
+// Icon and colour for each toast kind
 const TOAST_STYLE: Record<ToastKind, { icon: typeof CircleCheck; className: string }> = {
   success: { icon: CircleCheck, className: "text-emerald-600 dark:text-emerald-400" },
   error: { icon: CircleAlert, className: "text-rose-600 dark:text-rose-400" },
   info: { icon: Info, className: "text-sky-600 dark:text-sky-400" },
 };
 
+// Stack of toast popups in the top-right corner
 function Toaster({ toasts, onDismiss }: { toasts: ToastItem[]; onDismiss: (id: number) => void }) {
   // Toasts only exist after a user action, i.e. on the client.
   if (!toasts.length) return null;

@@ -1,7 +1,6 @@
 "use client";
 
-// PAGE: Gardens CRUD - create/list/edit/delete growing areas and choose the
-// active garden used by the rest of the app.
+// Gardens page: list, search, create, edit and delete gardens.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
 import Link from "next/link";
@@ -48,8 +47,10 @@ import { errorMessage, useFeedback } from "@/components/Feedback";
 import { apiDelete, apiPatch, apiPost } from "@/lib/api-client";
 import { getSelectedGardenId, setSelectedGardenId } from "@/lib/selected-garden";
 
+// How many garden cards to show per page.
 const PAGE_SIZE = 6;
 
+// Filter and sort options for the toolbar.
 type StatusFilter = "all" | "online" | "attention" | "none";
 type SortKey = "recent" | "name" | "pots" | "created";
 
@@ -67,14 +68,15 @@ const SORTS: { value: SortKey; label: string }[] = [
   { value: "pots", label: "Most pots" },
 ];
 
+// Groups a garden as online / needs attention / no devices for the filter.
 function deviceHealth(garden: Garden, overview?: GardenOverview): Exclude<StatusFilter, "all"> {
-  // Anything the details page would flag (dry pot, failed pump, disease…) needs attention.
+  // Any open alert (dry pot, failed pump, disease…) means "needs attention".
   if (overview?.alerts?.length) return "attention";
   if (garden._count.devices === 0) return "none";
   return overview && overview.deviceSummary.online === garden._count.devices ? "online" : "attention";
 }
 
-/** Page numbers to show, with "…" gaps for long ranges: 1 … 4 5 6 … 12 */
+// Page numbers to show, with "…" gaps for long lists: 1 … 4 5 6 … 12
 function pageList(current: number, total: number): (number | "…")[] {
   if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
   const pages = new Set([1, total, current - 1, current, current + 1]);
@@ -87,37 +89,42 @@ function pageList(current: number, total: number): (number | "…")[] {
   return out;
 }
 
+// The gardens page component.
 export default function GardensPage() {
   const { confirm, toast } = useFeedback();
+  // Load gardens, and their live overview (alerts, devices) every 30 s.
   const { data: gardens, mutate } = useSWR<Garden[]>("/api/gardens");
   const { data: gardenOverviews } = useSWR<GardenOverview[]>(
     "/api/gardens/overview",
     { refreshInterval: 30000 },
   );
   const [selectedId, setSelectedId] = useState("");
-  // null = drawer closed, "new" = creating, otherwise the id being edited.
+  // Drawer: null = closed, "new" = creating, otherwise the id being edited.
   const [drawer, setDrawer] = useState<"new" | string | null>(null);
   const [form, setForm] = useState<GardenForm>(emptyForm);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  // Search, filter, sort and page state.
   const [query, setQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [sort, setSort] = useState<SortKey>("recent");
   const [requestedPage, setRequestedPage] = useState(1);
 
-  // The active garden: the one picked here, else the one saved last time, else the first.
+  // Active garden: picked here, else saved last time, else the first one.
   const savedGardenId = getSelectedGardenId();
   const selectedGarden =
     gardens?.find((garden) => garden.id === selectedId) ??
     gardens?.find((garden) => garden.id === savedGardenId) ??
     gardens?.[0];
   const activeSelectedId = selectedGarden?.id ?? "";
+  // Quick lookup of each garden's overview by id.
   const overviewByGardenId = new Map(
     (gardenOverviews ?? []).map((overview) => [overview.id, overview]),
   );
   const editingGarden = drawer && drawer !== "new" ? gardens?.find((g) => g.id === drawer) : undefined;
 
+  // Gardens after search + filters, then sorted.
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
     const overviews = new Map((gardenOverviews ?? []).map((o) => [o.id, o]));
@@ -146,13 +153,12 @@ export default function GardensPage() {
   }, [gardens, gardenOverviews, query, typeFilter, statusFilter, sort]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  // Clamp rather than reset in an effect, so deleting the last card on a page
-  // simply lands on the previous one.
+  // Keep the page in range (e.g. after deleting the last card on a page).
   const page = Math.min(requestedPage, totalPages);
   const pageItems = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const filtersActive = query.trim() !== "" || typeFilter !== "all" || statusFilter !== "all";
 
-  // Any change to what's being listed starts again from page 1.
+  // Wraps a setter so changing a filter also goes back to page 1.
   function updateFilter<T>(setter: (value: T) => void) {
     return (value: T) => {
       setter(value);
@@ -160,6 +166,7 @@ export default function GardensPage() {
     };
   }
 
+  // Resets search and filters.
   function clearFilters() {
     setQuery("");
     setTypeFilter("all");
@@ -167,6 +174,7 @@ export default function GardensPage() {
     setRequestedPage(1);
   }
 
+  // Totals for the summary tiles.
   const totals = (gardens ?? []).reduce(
     (sum, garden) => ({
       pots: sum.pots + garden._count.pots,
@@ -181,22 +189,26 @@ export default function GardensPage() {
   );
   const pumpsOn = (gardenOverviews ?? []).reduce((sum, overview) => sum + overview.pumpsOn, 0);
 
+  // Remember the picked garden for other pages.
   useEffect(() => {
     if (selectedId) setSelectedGardenId(selectedId);
   }, [selectedId]);
 
+  // Opens the drawer with an empty form.
   function openCreate() {
     setError("");
     setForm(emptyForm);
     setDrawer("new");
   }
 
+  // Opens the drawer filled with this garden's details.
   function openEdit(garden: Garden) {
     setError("");
     setForm(gardenToForm(garden));
     setDrawer(garden.id);
   }
 
+  // Creates or updates the garden from the form.
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!drawer) return;
@@ -218,6 +230,7 @@ export default function GardensPage() {
     }
   }
 
+  // Asks for confirmation, then deletes the garden.
   async function remove(garden: Garden) {
     const ok = await confirm({
       title: `Delete “${garden.name}”?`,
@@ -255,6 +268,7 @@ export default function GardensPage() {
         }
       />
 
+      {/* Summary tiles */}
       <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <SummaryTile icon={Trees} label="Gardens" value={gardens?.length ?? 0} />
         <SummaryTile icon={Package} label="Pots" value={totals.pots} />
@@ -272,6 +286,7 @@ export default function GardensPage() {
         />
       </div>
 
+      {/* Loading, empty state, or toolbar + cards + pagination */}
       {!gardens ? (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {[0, 1, 2].map((i) => (
@@ -301,6 +316,7 @@ export default function GardensPage() {
         </Card>
       ) : (
         <>
+        {/* Search, filters and sort */}
         <div className="mb-5 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900 lg:flex-row lg:items-center">
           <label className="relative min-w-0 flex-1">
             <span className="sr-only">Search gardens</span>
@@ -363,6 +379,7 @@ export default function GardensPage() {
           </div>
         </div>
 
+        {/* No matches, or the garden cards */}
         {filtered.length === 0 ? (
           <Card className="flex flex-col items-center py-12 text-center">
             <Search size={24} className="text-slate-400" />
@@ -407,6 +424,7 @@ export default function GardensPage() {
         </>
       )}
 
+      {/* Slide-over drawer with the create/edit form */}
       <SlideOver
         open={drawer !== null}
         onClose={() => setDrawer(null)}
@@ -442,6 +460,7 @@ export default function GardensPage() {
   );
 }
 
+// Dropdown used in the toolbar (green border when not on the default).
 function ToolbarSelect({
   label,
   value,
@@ -477,6 +496,7 @@ function ToolbarSelect({
   );
 }
 
+// "Showing 1–6 of 20" text with previous/next and page buttons.
 function Pagination({
   page,
   totalPages,
@@ -549,6 +569,7 @@ function Pagination({
   );
 }
 
+// One summary number tile at the top of the page.
 function SummaryTile({
   icon: Icon,
   label,
@@ -572,12 +593,13 @@ function SummaryTile({
   );
 }
 
+// Dot colour and text for a garden's device status line.
 function deviceStatusSummary(devices: number, overview?: GardenOverview) {
-  // No sensor watching this garden: flag it red so it stands out.
+  // No devices: show red so it stands out.
   if (devices === 0) return { dot: "bg-rose-500", text: "No devices" };
   if (!overview) return { dot: "bg-slate-300 dark:bg-slate-600", text: "Checking…" };
   const { online, stale = 0, offline } = overview.deviceSummary;
-  // Devices that have never reported are not counted in any bucket.
+  // Devices that never reported aren't in any count, so work them out.
   const neverSeen = Math.max(0, devices - online - stale - offline);
   if (online === devices) {
     return { dot: "bg-emerald-500", text: devices === 1 ? "Online" : `All ${devices} online` };
@@ -591,6 +613,7 @@ function deviceStatusSummary(devices: number, overview?: GardenOverview) {
   return { dot, text: parts.join(" · ") };
 }
 
+// One garden card: name, type, device status, alerts and counts.
 function GardenCard({
   garden,
   overview,
@@ -670,6 +693,7 @@ function GardenCard({
         />
       </div>
 
+      {/* Device status and pumps running */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-5 text-xs font-medium text-slate-600 dark:text-slate-300">
         <span className="inline-flex items-center gap-1.5">
           <span aria-hidden="true" className={`h-2 w-2 rounded-full ${status.dot}`} />
@@ -685,12 +709,14 @@ function GardenCard({
 
       {alerts.length ? <CardAlerts alerts={alerts} href={detailsHref} /> : null}
 
+      {/* Pots, plants and devices counts */}
       <dl className="mx-5 mt-4 grid grid-cols-3 gap-2">
         <CardStat icon={Package} label="Pots" value={garden._count.pots} />
         <CardStat icon={Flower2} label="Plants" value={garden._count.plants} />
         <CardStat icon={Cpu} label="Devices" value={garden._count.devices} />
       </dl>
 
+      {/* Coordinates and View link */}
       <div className="mt-4 flex items-center justify-between gap-3 border-t border-slate-100 px-5 py-3 dark:border-slate-800">
         <span className="truncate text-xs text-slate-400" title="Latitude, longitude">
           {garden.lat != null && garden.lng != null
@@ -709,13 +735,14 @@ function GardenCard({
   );
 }
 
+// Icon and colours for each alert level.
 const ALERT_STYLE = {
   critical: { icon: OctagonAlert, row: "bg-rose-50 text-rose-800 dark:bg-rose-500/10 dark:text-rose-200", iconClass: "text-rose-600 dark:text-rose-400" },
   warning: { icon: TriangleAlert, row: "bg-amber-50 text-amber-800 dark:bg-amber-500/10 dark:text-amber-200", iconClass: "text-amber-600 dark:text-amber-400" },
   info: { icon: Info, row: "bg-sky-50 text-sky-800 dark:bg-sky-500/10 dark:text-sky-200", iconClass: "text-sky-600 dark:text-sky-400" },
 } as const;
 
-/** The two most serious open alerts, with "+N more" — full list on the details page. */
+// Shows the top 2 alerts on a card, plus a "+N more" link.
 function CardAlerts({ alerts, href }: { alerts: NonNullable<GardenOverview["alerts"]>; href: string }) {
   const shown = alerts.slice(0, 2);
   return (
@@ -741,6 +768,7 @@ function CardAlerts({ alerts, href }: { alerts: NonNullable<GardenOverview["aler
   );
 }
 
+// One small count box (pots / plants / devices).
 function CardStat({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: number }) {
   return (
     <div className="rounded-xl bg-slate-50 px-3 py-2.5 dark:bg-slate-950/60">
@@ -753,6 +781,7 @@ function CardStat({ icon: Icon, label, value }: { icon: LucideIcon; label: strin
   );
 }
 
+// The ⋮ menu on a garden card: view, edit, show on dashboard, delete.
 function GardenMenu({
   gardenName,
   detailsHref,
@@ -772,8 +801,10 @@ function GardenMenu({
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const close = useCallback(() => setOpen(false), []);
+  // Close the menu when clicking outside or pressing Escape.
   useDismiss(open, close, rootRef, triggerRef);
 
+  // Closes the menu, then runs the chosen action.
   function run(action: () => void) {
     setOpen(false);
     action();

@@ -1,16 +1,19 @@
-// Queue (POST { action }) or cancel (DELETE) a remote action for a board.
+// API /api/devices/[id]/action: queue or cancel a remote action for a board
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireUser } from "@/lib/api-auth";
 import { prisma } from "@/lib/db";
 import { DEVICE_ACTIONS } from "@/lib/device-actions";
 
+// Validation schema: the action must be one of the known device actions
 const schema = z.object({ action: z.enum(DEVICE_ACTIONS) });
 
+// Find the device only if this user owns it
 async function ownedDevice(userId: string, id: string) {
   return prisma.device.findFirst({ where: { id, userId }, select: { id: true } });
 }
 
+// POST: save an action for the board to pick up on its next poll
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const gate = await requireUser();
   if (gate instanceof NextResponse) return gate;
@@ -24,6 +27,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   return NextResponse.json({ success: true, action: parsed.data.action });
 }
 
+// DELETE: cancel the board's pending action
 export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const gate = await requireUser();
   if (gate instanceof NextResponse) return gate;

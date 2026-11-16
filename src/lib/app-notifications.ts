@@ -1,28 +1,25 @@
-// In-app notifications (the header bell and /notifications page).
-//
-// Event notifications are written inside the same transaction as the event
-// (pump failed, automatic watering, device offline/back online, disease
-// result, new device). Condition notifications — a pot that's dry in manual
-// mode, a probe that stopped reading — are found by `sweepUserNotifications`,
-// which runs when the bell polls, at most one per pot per condition per day.
+// Finds problems (dry pot, silent probe, idle board) and adds bell notifications
 import { prisma } from "@/lib/db";
 import { runDeviceOfflineMonitor } from "@/lib/device-monitoring";
 import { createAppNotificationOnce, potActionUrl } from "@/lib/notify";
 
-/** A reading this fresh counts as live (the board reports every ~5 s). */
+// A reading this fresh counts as live (the board reports every ~5 s)
 const LIVE_READING_MS = 60_000;
-/** The board is online but the pot has had no valid reading for this long. */
+// Board online but no valid pot reading for this long = probe problem
 const PROBE_SILENT_MS = 2 * 60_000;
-/** Don't re-run the sweep for a user more often than this. */
+// Don't re-run the sweep for a user more often than this
 const SWEEP_INTERVAL_MS = 20_000;
+// When each user's sweep last ran
 const lastSweep = new Map<string, number>();
 
+// Midnight of the given day (so each alert is sent at most once per day)
 function startOfDay(now: Date) {
   const day = new Date(now);
   day.setHours(0, 0, 0, 0);
   return day;
 }
 
+// Checks a user's boards and pots and creates any needed notifications
 export async function sweepUserNotifications(userId: string, now = new Date()) {
   const last = lastSweep.get(userId) ?? 0;
   if (now.getTime() - last < SWEEP_INTERVAL_MS) return;
@@ -31,8 +28,7 @@ export async function sweepUserNotifications(userId: string, now = new Date()) {
   // Mark silent boards offline (and notify) without waiting for the cron job.
   await runDeviceOfflineMonitor({ now }).catch((error) => console.error("Offline monitor failed:", error));
 
-  // Send queued Telegram alerts too, so they go out without the cron job
-  // (e.g. in local development). Only when this user has Telegram set up.
+  // Also send queued Telegram alerts if this user has Telegram set up
   const { getUserTelegramConfig } = await import("@/lib/telegram-settings");
   if (await getUserTelegramConfig(userId)) {
     const { runTelegramDeliveryWorker } = await import("@/lib/telegram-outbox");
@@ -41,6 +37,7 @@ export async function sweepUserNotifications(userId: string, now = new Date()) {
     );
   }
 
+  // Load the user's connected pots with their latest moisture reading
   const pots = await prisma.pot.findMany({
     where: { userId, deviceMappings: { some: {} } },
     select: {
@@ -83,6 +80,7 @@ export async function sweepUserNotifications(userId: string, now = new Date()) {
       today,
     );
   }
+  // Warn about a silent probe, or a dry pot in manual mode
   for (const pot of pots) {
     const device = pot.deviceMappings[0]?.device;
     const boardOnline = Boolean(device?.lastSeenAt && now.getTime() - device.lastSeenAt.getTime() < LIVE_READING_MS);

@@ -1,4 +1,4 @@
-// After the user presses Start in their bot: find that chat and save it.
+// API /api/telegram/settings/detect: find the chat after the user presses Start
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/api-auth";
 import { prisma } from "@/lib/db";
@@ -6,7 +6,9 @@ import { openSecret } from "@/lib/secret-box";
 
 export const runtime = "nodejs";
 
+// POST: look up the user's chat with their bot and save it
 export async function POST() {
+  // Auth check: only logged-in users
   const gate = await requireUser();
   if (gate instanceof NextResponse) return gate;
   const settings = await prisma.telegramSettings.findUnique({ where: { userId: gate } });

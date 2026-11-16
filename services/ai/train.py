@@ -1,3 +1,4 @@
+# Trains the plant-disease image model (MobileNetV2) on the PlantVillage photos.
 import argparse
 import json
 from pathlib import Path
@@ -5,6 +6,7 @@ from pathlib import Path
 import tensorflow as tf
 
 
+# Reads the command-line options (data folder, epochs, image size, ...)
 def parse_args():
     parser = argparse.ArgumentParser(description="Train PlantVillage disease classifier.")
     parser.add_argument("--data-dir", default="data/PlantVillage", help="Directory with class subfolders.")
@@ -16,6 +18,7 @@ def parse_args():
     return parser.parse_args()
 
 
+# Builds the model: a frozen pretrained MobileNetV2 plus a new output layer
 def build_model(image_size: int, class_count: int):
     inputs = tf.keras.Input(shape=(image_size, image_size, 3))
     base = tf.keras.applications.MobileNetV2(
@@ -25,6 +28,7 @@ def build_model(image_size: int, class_count: int):
     )
     base.trainable = False
 
+    # Random flips/rotations so the model sees more varied photos
     x = tf.keras.layers.RandomFlip("horizontal")(inputs)
     x = tf.keras.layers.RandomRotation(0.08)(x)
     x = tf.keras.applications.mobilenet_v2.preprocess_input(x)
@@ -42,6 +46,7 @@ def build_model(image_size: int, class_count: int):
     return model
 
 
+# Loads the photos, trains the model, then saves it with its labels
 def main():
     args = parse_args()
     data_dir = Path(args.data_dir)
@@ -51,6 +56,7 @@ def main():
     if not data_dir.exists():
         raise FileNotFoundError(f"Dataset directory not found: {data_dir}")
 
+    # Split the photos: 80% for training, 20% for checking (validation)
     train_ds = tf.keras.utils.image_dataset_from_directory(
         data_dir,
         validation_split=args.validation_split,
@@ -74,6 +80,7 @@ def main():
     val_ds = val_ds.prefetch(autotune)
 
     model = build_model(args.image_size, len(labels))
+    # Keep the best model, and stop early when it stops improving
     callbacks = [
         tf.keras.callbacks.ModelCheckpoint(
             filepath=str(model_dir / "plant_disease_model.keras"),
@@ -83,6 +90,7 @@ def main():
         tf.keras.callbacks.EarlyStopping(monitor="val_loss", patience=4, restore_best_weights=True),
     ]
 
+    # Train, then save the model, class labels and training history
     history = model.fit(train_ds, validation_data=val_ds, epochs=args.epochs, callbacks=callbacks)
     model.save(model_dir / "plant_disease_model.keras")
     (model_dir / "labels.json").write_text(json.dumps(labels, indent=2), encoding="utf-8")

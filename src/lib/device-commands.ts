@@ -1,3 +1,4 @@
+// Queues pump on/off commands for boards and records the board's replies
 import type { DeviceCommand, DeviceCommandType, IrrigationStatus, PotIrrigationMode } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { getDeviceCommandSettings } from "@/lib/device-command-settings";
@@ -5,22 +6,21 @@ import { formatPumpAcknowledgementNotification, formatPumpFailureNotification } 
 import { enqueueTelegramDelivery } from "@/lib/telegram-delivery-enqueue";
 import { createAppNotification, potActionUrl } from "@/lib/notify";
 
+// Convert between pump state (on/off) and command (PUMP_ON/PUMP_OFF)
 export const pumpStateToCommand = (state: IrrigationStatus): DeviceCommandType => state === "on" ? "PUMP_ON" : "PUMP_OFF";
 export const commandToPumpState = (command: DeviceCommandType): IrrigationStatus => command === "PUMP_ON" ? "on" : "off";
 
+// Board fields we load when choosing where to send a command
 const DEVICE_SELECT = { id: true, gardenId: true, userId: true, hardwareId: true, status: true, lastSeenAt: true } as const;
-// Postgres sorts NULL first for DESC; a never-seen device must not win.
+// Most recently seen board first; never-seen boards go last
 const RECENTLY_SEEN_FIRST = [{ lastSeenAt: { sort: "desc", nulls: "last" } }, { createdAt: "desc" }] as const;
 
+// Finds the garden's ESP32 board, most recently seen first
 export async function findGardenDevice(gardenId: string, userId: string) {
   return prisma.device.findFirst({ where: { gardenId, userId, type: "esp32_node" }, orderBy: [...RECENTLY_SEEN_FIRST], select: DEVICE_SELECT });
 }
 
-/**
- * The device that should receive a pot's pump commands: the one connected to
- * the pot (DevicePotMapping), most recently seen first. Falls back to the
- * garden's ESP32 only when no device is connected to the pot.
- */
+// Finds the board connected to a pot, or else the garden's board
 export async function findPotDevice(potId: string, gardenId: string, userId: string) {
   const connected = await prisma.device.findFirst({
     where: { gardenId, userId, potMappings: { some: { potId } } },
@@ -30,6 +30,7 @@ export async function findPotDevice(potId: string, gardenId: string, userId: str
   return connected ?? findGardenDevice(gardenId, userId);
 }
 
+// Queues a pump command; PUMP_OFF wins over PUMP_ON for safety
 export async function queuePumpCommand(input: { userId: string; gardenId: string; deviceId: string; potId: string; command: DeviceCommandType; mode: PotIrrigationMode; decisionMoisture?: number; onThreshold?: number; offThreshold?: number }) {
   const now = new Date(), settings = getDeviceCommandSettings();
   return prisma.$transaction(async (tx) => {
@@ -39,13 +40,14 @@ export async function queuePumpCommand(input: { userId: string; gardenId: string
     const pendingOff = active.find((c) => c.command === "PUMP_OFF");
     if (input.command === "PUMP_ON" && pendingOff) return { command: pendingOff, created: false, blocked: true };
     await tx.deviceCommand.updateMany({ where: { deviceId: input.deviceId, potId: input.potId, status: { in: input.command === "PUMP_OFF" ? ["PENDING", "SENT", "RETRYING"] : ["PENDING", "RETRYING"] } }, data: { status: "CANCELLED", error: input.command === "PUMP_OFF" ? "Superseded by safety-priority PUMP_OFF" : "Superseded by newer pump command", processedAt: now } });
-    // Incrementing the Pot row obtains a row lock, making sequences monotonic.
+    // Bump the pot's counter (locks the row) so command numbers always go up
     const pot = await tx.pot.update({ where: { id: input.potId }, data: { commandSequence: { increment: 1 } }, select: { commandSequence: true } });
     const command = await tx.deviceCommand.create({ data: { ...input, sequence: pot.commandSequence, expiresAt: new Date(now.getTime() + settings.maxLifetimeMs), nextAttemptAt: now } });
     return { command, created: true, blocked: false };
   });
 }
 
+// Gives a board its waiting commands, expiring or retrying old ones first
 export async function claimDeviceCommands(deviceId: string, limit = 20, now = new Date()) {
   const s = getDeviceCommandSettings();
   await prisma.deviceCommand.updateMany({ where: { deviceId, status: { in: ["PENDING", "SENT", "RETRYING"] }, expiresAt: { lte: now } }, data: { status: "EXPIRED", error: "Command lifetime expired", processedAt: now } });
@@ -55,7 +57,7 @@ export async function claimDeviceCommands(deviceId: string, limit = 20, now = ne
   const commands: DeviceCommand[] = [], pots = new Set<string>();
   for (const c of candidates) {
     if (pots.has(c.potId)) continue;
-    // Conditional update is the claim token: concurrent polls cannot both send it.
+    // Only one poll can claim a command, so it is never sent twice at once
     const result = await prisma.deviceCommand.updateMany({ where: { id: c.id, status: { in: ["PENDING", "RETRYING"] }, nextAttemptAt: { lte: now }, expiresAt: { gt: now } }, data: { status: "SENT", sentAt: c.sentAt ?? now, lastAttemptAt: now, attemptCount: { increment: 1 }, nextAttemptAt: new Date(now.getTime() + s.ackTimeoutMs) } });
     if (result.count) { commands.push({ ...c, status: "SENT", sentAt: c.sentAt ?? now, lastAttemptAt: now, attemptCount: c.attemptCount + 1, nextAttemptAt: new Date(now.getTime() + s.ackTimeoutMs) }); pots.add(c.potId); }
     if (commands.length === limit) break;
@@ -63,6 +65,7 @@ export async function claimDeviceCommands(deviceId: string, limit = 20, now = ne
   return commands;
 }
 
+// Handles the board's reply that it received or ran (or failed) a command
 export async function acknowledgePumpCommand(input: { commandId: string; deviceId: string; kind: "delivery" | "execution"; success?: boolean; error?: string }) {
   const command = await prisma.deviceCommand.findFirst({ where: { id: input.commandId, deviceId: input.deviceId } });
   if (!command) throw new Error("Command not found");
@@ -77,6 +80,7 @@ export async function acknowledgePumpCommand(input: { commandId: string; deviceI
   return executeCommand(command, now);
 }
 
+// Marks a command failed, logs it and alerts the user
 async function failCommand(command: DeviceCommand, error: string, now: Date) {
   const updated = await prisma.$transaction(async (tx) => {
     const changed = await tx.deviceCommand.updateMany({ where: { id: command.id, status: "SENT", executionResultAt: null }, data: { status: "FAILED", error, processedAt: now, executionResultAt: now } });
@@ -89,6 +93,7 @@ async function failCommand(command: DeviceCommand, error: string, now: Date) {
   return { command: updated, notification: { success: false as const, occurredAt: now } };
 }
 
+// Marks a command done, updates the pump state and logs the event
 async function executeCommand(command: DeviceCommand, now: Date) {
   const result = await prisma.$transaction(async (tx) => {
     const changed = await tx.deviceCommand.updateMany({ where: { id: command.id, status: "SENT", executionResultAt: null }, data: { status: "ACKNOWLEDGED", error: null, processedAt: now, acknowledgedAt: now, executionResultAt: now } });

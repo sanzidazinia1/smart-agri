@@ -1,12 +1,11 @@
-// TASK: Auth — account registration.
-// WHAT: Creates a User (scrypt-hashed password) + their default IrrigationConfig.
-//       Login itself is handled by Auth.js (src/auth.ts) Credentials provider.
+// API /api/auth/register: sign up a new user (login itself is done by Auth.js)
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { hashPassword } from "@/lib/password";
 import { defaultIrrigation } from "@/lib/defaults";
 
+// Validation schema: what a sign-up form must send
 const schema = z.object({
   email: z.string().trim().email("Enter a valid email address"),
   // Same rule as changing the password in Settings.
@@ -14,9 +13,11 @@ const schema = z.object({
   userName: z.string().trim().max(100).optional(),
 });
 
+// POST: create a user with a hashed password and default watering settings
 export async function POST(req: Request) {
   try {
     const body = await req.json();
+    // Validate the form data before touching the database
     const parsed = schema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json(
@@ -28,6 +29,7 @@ export async function POST(req: Request) {
     const { email, password, userName } = parsed.data;
     const normalizedEmail = email.toLowerCase();
 
+    // Stop if this email is already registered
     const existing = await prisma.user.findUnique({
       where: { email: normalizedEmail },
     });
@@ -38,8 +40,10 @@ export async function POST(req: Request) {
       );
     }
 
+    // Never store the plain password, only its salted hash
     const { passwordHash, passwordSalt } = hashPassword(password);
 
+    // DB write: create the user plus their default irrigation config
     const user = await prisma.user.create({
       data: {
         email: normalizedEmail,

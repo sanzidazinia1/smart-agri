@@ -1,7 +1,6 @@
 "use client";
 
-// Right-hand panels for growing a garden: add a pot with its plant (both
-// required, with soil/watering recommendations), and register a device.
+// Side panels to add a pot with its plant, add a device, or edit a pot
 import { useState } from "react";
 import useSWR from "swr";
 import { Check, Copy, Cpu, Flower2, KeyRound, Leaf, Package, Sprout, Sun, Thermometer } from "lucide-react";
@@ -21,6 +20,7 @@ import {
   type SoilType,
 } from "@/lib/plant-catalog";
 
+// Plant categories in the order they appear in suggestions
 const CATEGORY_ORDER = ["Indoor", "Flower", "Herb", "Vegetable", "Fruit"];
 /** Suggestions grouped by type: indoor & balcony plants first. */
 const SORTED_CATALOG = [...PLANT_CATALOG].sort(
@@ -32,10 +32,13 @@ function catalogHint(plant: PlantProfile) {
   return [plant.category, plant.aliases?.join(", ")].filter(Boolean).join(" · ");
 }
 
+// Growth stages offered when adding a new plant
 const GROWTH_STAGES = NEW_PLANT_STAGES;
 
+// Device type choices for the dropdown
 const DEVICE_TYPES = Object.entries(DEVICE_TYPE_LABELS).map(([value, label]) => ({ value, label }));
 
+// Shared styles for inputs and buttons in these panels
 const fieldClass =
   "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950";
 const primaryButton =
@@ -44,6 +47,7 @@ const secondaryButton =
   "rounded-lg border border-slate-300 px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800";
 
 
+// Values typed into the "Add pot & plant" form
 interface PlantingForm {
   plantName: string;
   variety: string;
@@ -73,6 +77,7 @@ function blankPlanting(): PlantingForm {
   };
 }
 
+// A device as returned by the API, with its pots and ports
 interface UserDevice {
   id: string;
   name: string;
@@ -85,8 +90,10 @@ interface UserDevice {
   portStatus?: { port: number; moisture: number | null; pump: boolean | null }[] | null;
 }
 
+// Most ports one board can have
 const MAX_PORTS = 6;
 
+// Status dot colour for each device status
 const STATUS_DOT: Record<string, string> = {
   ONLINE: "bg-emerald-500",
   STALE: "bg-amber-500",
@@ -94,6 +101,7 @@ const STATUS_DOT: Record<string, string> = {
   NEVER_SEEN: "bg-slate-400",
 };
 
+// Side panel for adding a pot and its plant (and optionally a device)
 export function AddPlantingPanel({
   open,
   onClose,
@@ -109,8 +117,10 @@ export function AddPlantingPanel({
   existingPotLabels: string[];
   onCreated: () => void;
 }) {
+  // Set after a new device is created, to show its key
   const [newDevice, setNewDevice] = useState<{ name: string; hardwareId: string; key: string } | null>(null);
 
+  // Close the panel and forget the new device
   function close() {
     setNewDevice(null);
     onClose();
@@ -162,8 +172,10 @@ export function AddPlantingPanel({
   );
 }
 
+// How the user wants to connect a device to the new pot
 type DeviceChoice = "none" | "existing" | "new";
 
+// The form inside the "Add pot & plant" panel
 function PlantingFields({
   gardenId,
   existingPotLabels,
@@ -173,23 +185,23 @@ function PlantingFields({
   existingPotLabels: string[];
   onCreated: (newDevice: { name: string; hardwareId: string; key: string } | null) => void;
 }) {
+  // Form values, next pot number, and whether the typed pot name is taken
   const [form, setForm] = useState<PlantingForm>(() => blankPlanting());
   const { data: allPots } = useSWR<{ number: number }[]>("/api/pots");
   const nextNumber = allPots ? Math.max(0, ...allPots.map((pot) => pot.number)) + 1 : null;
   const labelTaken = existingPotLabels.some((label) => label.toLowerCase() === form.label.trim().toLowerCase());
+  // Device choice and any error or saving state
   const [deviceChoice, setDeviceChoice] = useState<DeviceChoice>("none");
   // The board and port that will water this pot.
   const [picked, setPicked] = useState<{ deviceId: string; port: number } | null>(null);
   const [newDevice, setNewDevice] = useState({ name: "", hardwareId: "", type: "esp32_node" });
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  // The user's plants and devices (devices refresh every 5 s)
   const { data: plants } = useSWR<{ commonName: string; gardenId: string }[]>("/api/plants");
   const { data: allDevices } = useSWR<UserDevice[]>("/api/devices", { refreshInterval: 5000 });
 
-  // A board is available while it has a free port (one pot per port) — or can
-  // get a new one (firmware 2.9+, up to 6). A board already serving pots in
-  // another garden can't move here without them. This garden's boards first,
-  // then ones not in a garden, then other gardens'.
+  // Boards with a free port (or room for a new one); this garden's boards first
   const rank = (device: UserDevice) => (device.gardenId === gardenId ? 0 : device.gardenId === null ? 1 : 2);
   const slotsOf = (device: UserDevice) => {
     const used = new Set(device.pots.map((p) => p.port));
@@ -214,18 +226,20 @@ function PlantingFields({
   const firstChoice = freeDevices[0] ? { deviceId: freeDevices[0].id, port: slotsOf(freeDevices[0]).free[0] ?? slotsOf(freeDevices[0]).newPort! } : null;
   const selected = pickStillValid ? picked! : firstChoice;
 
+  // Known plant profile, and how many of this plant the user already grows
   const profile = findPlantProfile(form.plantName);
   const name = form.plantName.trim();
   const sameKind = name ? (plants ?? []).filter((plant) => isSamePlant(plant.commonName, name)) : [];
   const inThisGarden = sameKind.filter((plant) => plant.gardenId === gardenId).length;
+  // Update one field of the form
   const set = <K extends keyof PlantingForm>(key: K, value: PlantingForm[K]) => setForm((f) => ({ ...f, [key]: value }));
 
+  // Change the plant name; fill soil/watering tips when it's a known plant
   function choosePlant(value: string) {
     const next = findPlantProfile(value);
     setForm((f) => {
       const previous = findPlantProfile(f.plantName);
-      // Apply the recommendation when the plant changes to a known one; keep
-      // the user's own choices while they're still typing the same plant.
+      // Known new plant: apply its tips; otherwise keep the user's own choices
       if (next && next !== previous) {
         return {
           ...f,
@@ -239,6 +253,7 @@ function PlantingFields({
     });
   }
 
+  // "Use these" button: copy the recommended soil and watering levels
   function applyRecommendation(plant: PlantProfile) {
     setForm((f) => ({
       ...f,
@@ -248,6 +263,7 @@ function PlantingFields({
     }));
   }
 
+  // Check watering levels, then create the pot, plant and device together
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
@@ -297,6 +313,7 @@ function PlantingFields({
     }
   }
 
+  // Is the chosen soil the recommended one?
   const soilMatches = profile && form.soilType === profile.soil;
 
   return (
@@ -324,6 +341,7 @@ function PlantingFields({
           </datalist>
         </label>
 
+        {/* How many of this plant the user already has */}
         {name ? (
           <p className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:bg-slate-950/60 dark:text-slate-300">
             <Sprout size={14} className="shrink-0 text-emerald-600 dark:text-emerald-400" />
@@ -347,6 +365,7 @@ function PlantingFields({
           </p>
         ) : null}
 
+        {/* Growing tips for known plants */}
         {profile ? (
           <Recommendation profile={profile} onApply={() => applyRecommendation(profile)} applied={!!soilMatches} />
         ) : name ? (
@@ -355,6 +374,7 @@ function PlantingFields({
           </p>
         ) : null}
 
+        {/* Variety, growth stage and planting date */}
         <div className="grid grid-cols-2 gap-3">
           <Input label="Variety (optional)" value={form.variety} onChange={(v) => set("variety", v)} placeholder="e.g. Cherry" />
           <label className="block">
@@ -409,6 +429,7 @@ function PlantingFields({
             </select>
           </label>
         </div>
+        {/* Watering levels */}
         <div className="grid grid-cols-2 gap-3">
           <Input
             label="Start watering below (%)"
@@ -430,6 +451,7 @@ function PlantingFields({
         <p className="-mt-2 text-xs text-slate-500 dark:text-slate-400">
           Automatic watering keeps soil moisture between these two levels.
         </p>
+        {/* Pot size and position */}
         <div className="grid grid-cols-2 gap-3">
           <Input label="Pot size, cm (optional)" value={form.sizeCm} onChange={(v) => set("sizeCm", v)} type="number" step="any" />
           <Input label="Position (optional)" value={form.position} onChange={(v) => set("position", v)} placeholder="e.g. Balcony, left" />
@@ -442,6 +464,7 @@ function PlantingFields({
         <p className="-mt-1 text-xs text-slate-500 dark:text-slate-400">
           A connected device keeps this pot&apos;s soil moisture up to date and drives automatic watering.
         </p>
+        {/* Device choices: skip, use a port, or register new */}
         <div role="radiogroup" aria-label="Device" className="grid gap-2">
           <ChoiceCard checked={deviceChoice === "none"} onSelect={() => setDeviceChoice("none")} title="Skip for now" hint="Connect a device later from the pot card." />
           <ChoiceCard
@@ -459,6 +482,7 @@ function PlantingFields({
                     : "You haven't added a device yet"
             }
           />
+          {/* Port picker for existing devices */}
           {deviceChoice === "existing" && freeDevices.length ? (
             <div aria-label="Available ports" className="max-h-80 space-y-2 overflow-y-auto rounded-xl border border-slate-200 p-2 dark:border-slate-800">
               {freeDevices.map((device) => {
@@ -542,6 +566,7 @@ function PlantingFields({
           <ChoiceCard checked={deviceChoice === "new"} onSelect={() => setDeviceChoice("new")} title="Register a new device" hint="You'll get its key after saving." />
         </div>
 
+        {/* New device fields */}
         {deviceChoice === "new" ? (
           <div className="space-y-3 rounded-xl border border-slate-200 p-3 dark:border-slate-800">
             <div className="grid grid-cols-2 gap-3">
@@ -562,16 +587,19 @@ function PlantingFields({
         ) : null}
       </section>
 
+      {/* Error and saving messages */}
       {error ? <p className="text-sm font-bold text-rose-600">{error}</p> : null}
       {saving ? <p className="text-sm text-slate-500">Saving…</p> : null}
     </form>
   );
 }
 
+// Friendly text for a device status
 function statusLabel(status: string) {
   return status === "ONLINE" ? "online" : status === "STALE" ? "delayed" : status === "OFFLINE" ? "offline" : "not connected yet";
 }
 
+// Radio-style option card with a title and hint
 function ChoiceCard({
   checked,
   onSelect,
@@ -614,6 +642,7 @@ function ChoiceCard({
   );
 }
 
+// Numbered section heading with "optional" or "required" tag
 function StepHeading({
   step,
   icon: Icon,
@@ -639,6 +668,7 @@ function StepHeading({
   );
 }
 
+// Box with the recommended soil, moisture, temperature and sunlight
 function Recommendation({ profile, onApply, applied }: { profile: PlantProfile; onApply: () => void; applied: boolean }) {
   return (
     <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-4 dark:border-emerald-500/25 dark:bg-emerald-500/5">
@@ -679,6 +709,7 @@ function Recommendation({ profile, onApply, applied }: { profile: PlantProfile; 
   );
 }
 
+// One label + value line inside the recommendation box
 function Fact({ label, value, wide, icon: Icon }: { label: string; value: string; wide?: boolean; icon?: typeof Sun }) {
   return (
     <div className={wide ? "col-span-2" : ""}>
@@ -691,6 +722,7 @@ function Fact({ label, value, wide, icon: Icon }: { label: string; value: string
   );
 }
 
+// Side panel for registering a device to a pot
 export function AddDevicePanel({
   open,
   onClose,
@@ -705,8 +737,10 @@ export function AddDevicePanel({
   pot: { id: string; label: string } | null;
   onCreated: () => void;
 }) {
+  // Set after the device is created, to show its key
   const [created, setCreated] = useState<{ name: string; hardwareId: string; key: string } | null>(null);
 
+  // Close the panel and forget the created device
   function close() {
     setCreated(null);
     onClose();
@@ -756,6 +790,7 @@ export function AddDevicePanel({
   );
 }
 
+// The form inside the "Add device" panel
 function DeviceFields({
   gardenId,
   potId,
@@ -765,12 +800,14 @@ function DeviceFields({
   potId: string;
   onCreated: (result: { name: string; hardwareId: string; key: string }) => void;
 }) {
+  // Form values plus error and saving state
   const [name, setName] = useState("");
   const [hardwareId, setHardwareId] = useState("");
   const [type, setType] = useState("esp32_node");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
+  // Create the device on the server and pass back its key
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
@@ -816,9 +853,11 @@ function DeviceFields({
   );
 }
 
+// Shows a new device's secret key once, with a copy button
 export function DeviceKey({ created }: { created: { name: string; hardwareId: string; key: string } }) {
   const [copied, setCopied] = useState(false);
 
+  // Copy the key to the clipboard
   async function copy() {
     try {
       await navigator.clipboard.writeText(created.key);
@@ -835,6 +874,7 @@ export function DeviceKey({ created }: { created: { name: string; hardwareId: st
         <Check size={16} />
         {created.name} ({created.hardwareId}) is registered.
       </p>
+      {/* The key and copy button */}
       <div>
         <p className="mb-1 flex items-center gap-1.5 text-sm font-bold">
           <KeyRound size={15} className="text-amber-500" />
@@ -853,6 +893,7 @@ export function DeviceKey({ created }: { created: { name: string; hardwareId: st
           Save this key now. It won&apos;t be shown again — only a secure hash is stored.
         </p>
       </div>
+      {/* What to do next */}
       <div className="rounded-lg bg-slate-50 p-3 text-xs text-slate-600 dark:bg-slate-950/60 dark:text-slate-300">
         <p className="font-semibold">Next steps</p>
         <ol className="mt-1 list-decimal space-y-1 pl-4">
@@ -864,13 +905,13 @@ export function DeviceKey({ created }: { created: { name: string; hardwareId: st
   );
 }
 
-// ---------------------------------------------------------------------------
-// Edit an existing pot and its plant
-// ---------------------------------------------------------------------------
+// ---------- Edit an existing pot and its plant ----------
 
+// Health choices, and all growth stages for editing
 const HEALTH_OPTIONS = ["healthy", "at_risk", "diseased", "recovering", "unknown"] as const;
 const EDIT_STAGES = ALL_GROWTH_STAGES;
 
+// Pot info passed in from the pot card
 export interface EditablePot {
   id: string;
   label: string;
@@ -880,6 +921,7 @@ export interface EditablePot {
   plant: { id: string; commonName: string } | null;
 }
 
+// Extra pot and plant details loaded from the API
 interface PotDetails {
   id: string;
   sizeCm: number | null;
@@ -894,6 +936,7 @@ interface PlantDetails {
   healthStatus: (typeof HEALTH_OPTIONS)[number];
 }
 
+// Side panel for editing a pot and its plant
 export function EditPotPanel({
   open,
   onClose,
@@ -907,6 +950,7 @@ export function EditPotPanel({
   pot: EditablePot | null;
   onSaved: () => void;
 }) {
+  // Load full pot and plant details for this garden while open
   const { data: pots } = useSWR<PotDetails[]>(open ? `/api/pots?gardenId=${gardenId}` : null);
   const { data: plants } = useSWR<PlantDetails[]>(open ? `/api/plants?gardenId=${gardenId}` : null);
   const details = pots?.find((item) => item.id === pot?.id);
@@ -931,6 +975,7 @@ export function EditPotPanel({
         </>
       }
     >
+      {/* The form, or grey placeholders while loading */}
       {open && pot && ready ? (
         <EditPotFields
           key={pot.id}
@@ -954,6 +999,7 @@ export function EditPotPanel({
   );
 }
 
+// The form inside the "Edit pot" panel
 function EditPotFields({
   pot,
   details,
@@ -967,6 +1013,7 @@ function EditPotFields({
   gardenId: string;
   onSaved: () => void;
 }) {
+  // Starting values, used to find what changed
   const initial = {
     plantName: plant?.commonName ?? "",
     variety: plant?.variety ?? "",
@@ -979,10 +1026,13 @@ function EditPotFields({
     waterBelow: String(pot.moistureOnThreshold),
     stopAt: String(pot.moistureOffThreshold),
   };
+  // Form values plus error and saving state
   const [form, setForm] = useState(initial);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  // Update one field of the form
   const set = <K extends keyof typeof form>(key: K, value: (typeof form)[K]) => setForm((f) => ({ ...f, [key]: value }));
+  // Known plant profile, and whether its tips are already applied
   const profile = findPlantProfile(form.plantName);
   const recommendationApplied =
     profile &&
@@ -990,6 +1040,7 @@ function EditPotFields({
     form.waterBelow === String(profile.moisture[0]) &&
     form.stopAt === String(profile.moisture[1]);
 
+  // Check the values, then save only the parts that changed
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
@@ -1051,6 +1102,7 @@ function EditPotFields({
 
   return (
     <form id="edit-pot-form" onSubmit={submit} className="space-y-5" aria-busy={saving}>
+      {/* Plant section */}
       <section className="space-y-4" aria-label="Plant">
         <h3 className="flex items-center gap-2 text-sm font-bold">
           <Flower2 size={15} className="text-slate-400" />
@@ -1097,6 +1149,7 @@ function EditPotFields({
             ))}
           </select>
         </label>
+        {/* Suggest the recommended soil and watering for known plants */}
         {profile && !recommendationApplied ? (
           <div className="flex items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50/60 px-3 py-2.5 text-xs dark:border-emerald-500/25 dark:bg-emerald-500/5">
             <span className="text-emerald-900 dark:text-emerald-100">
@@ -1121,6 +1174,7 @@ function EditPotFields({
         ) : null}
       </section>
 
+      {/* Pot section */}
       <section className="space-y-4 border-t border-slate-100 pt-5 dark:border-slate-800" aria-label="Pot">
         <h3 className="flex items-center gap-2 text-sm font-bold">
           <Package size={15} className="text-slate-400" />
@@ -1146,6 +1200,7 @@ function EditPotFields({
         </div>
       </section>
 
+      {/* Watering section */}
       <section className="space-y-3 border-t border-slate-100 pt-5 dark:border-slate-800" aria-label="Watering">
         <h3 className="flex items-center gap-2 text-sm font-bold">
           <Sprout size={15} className="text-slate-400" />
@@ -1158,6 +1213,7 @@ function EditPotFields({
         <p className="text-xs text-slate-500 dark:text-slate-400">Automatic watering keeps soil moisture between these levels.</p>
       </section>
 
+      {/* Error and saving messages */}
       {error ? <p className="text-sm font-bold text-rose-600">{error}</p> : null}
       {saving ? <p className="text-sm text-slate-500">Saving…</p> : null}
     </form>

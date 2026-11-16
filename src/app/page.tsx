@@ -1,6 +1,4 @@
-// PAGE: Public home page. Describes what SmartAgri actually does today — a
-// soil sensor per pot, automatic watering, phone alerts, a leaf doctor with
-// home remedies — using previews built from the app's own design language.
+// Public home (landing) page: explains SmartAgri and links to sign up / log in.
 import Link from "next/link";
 import {
   ArrowRight,
@@ -28,6 +26,7 @@ import { auth } from "@/auth";
 import { LandingNavigation } from "@/components/LandingNavigation";
 import { PLANT_CATALOG } from "@/lib/plant-catalog";
 
+// Example plant names shown in the plants strip.
 const PLANT_CHIPS = [
   "Tulsi",
   "Money plant",
@@ -47,7 +46,9 @@ const PLANT_CHIPS = [
   "Peace lily",
 ];
 
+// The landing page; buttons change if the visitor is already logged in.
 export default async function LandingPage() {
+  // Logged in? Then buttons go to the dashboard instead of sign-up.
   const session = await auth();
   const signedIn = Boolean(session?.user);
   const primaryHref = signedIn ? "/dashboard" : "/register";
@@ -58,7 +59,7 @@ export default async function LandingPage() {
       <LandingNavigation signedIn={signedIn} />
 
       <main>
-        {/* ---------- Hero ---------- */}
+        {/* ---------- Hero: headline, buttons and app preview ---------- */}
         <section className="relative isolate">
           <div
             aria-hidden="true"
@@ -108,7 +109,7 @@ export default async function LandingPage() {
           </div>
         </section>
 
-        {/* ---------- Plants strip ---------- */}
+        {/* ---------- Plants strip: example plants it knows ---------- */}
         <section aria-label="Plants SmartAgri knows" className="border-y border-slate-200 bg-white py-8 dark:border-slate-800 dark:bg-slate-900/50">
           <div className="mx-auto flex max-w-7xl flex-col gap-4 px-5 sm:px-8 lg:flex-row lg:items-center lg:gap-8">
             <p className="shrink-0 text-sm font-bold text-slate-500 dark:text-slate-400">
@@ -128,7 +129,7 @@ export default async function LandingPage() {
           </div>
         </section>
 
-        {/* ---------- Features ---------- */}
+        {/* ---------- Features: what the app does ---------- */}
         <section id="features" className="scroll-mt-6 py-20 sm:py-24">
           <div className="mx-auto max-w-7xl px-5 sm:px-8">
             <SectionIntro
@@ -174,7 +175,7 @@ export default async function LandingPage() {
           </div>
         </section>
 
-        {/* ---------- How it works ---------- */}
+        {/* ---------- How it works: 3 setup steps ---------- */}
         <section id="how-it-works" className="scroll-mt-6 border-y border-slate-200 bg-white py-20 sm:py-24 dark:border-slate-800 dark:bg-slate-900/40">
           <div className="mx-auto max-w-7xl px-5 sm:px-8">
             <SectionIntro eyebrow="How it works" title="Set up in an evening. No coding." text="If you can join a Wi-Fi network on your phone, you can set up SmartAgri." />
@@ -211,7 +212,7 @@ export default async function LandingPage() {
           </div>
         </section>
 
-        {/* ---------- Hardware ---------- */}
+        {/* ---------- Hardware: parts needed per pot ---------- */}
         <section id="hardware" className="scroll-mt-6 py-20 sm:py-24">
           <div className="mx-auto grid max-w-7xl gap-12 px-5 sm:px-8 lg:grid-cols-2 lg:items-center">
             <div>
@@ -251,7 +252,7 @@ export default async function LandingPage() {
           </div>
         </section>
 
-        {/* ---------- FAQ ---------- */}
+        {/* ---------- FAQ: common questions ---------- */}
         <section id="faq" className="scroll-mt-6 border-t border-slate-200 bg-white py-20 sm:py-24 dark:border-slate-800 dark:bg-slate-900/40">
           <div className="mx-auto max-w-3xl px-5 sm:px-8">
             <SectionIntro eyebrow="Questions" title="Good to know" text="" center />
@@ -269,7 +270,7 @@ export default async function LandingPage() {
           </div>
         </section>
 
-        {/* ---------- Final CTA ---------- */}
+        {/* ---------- Final call to action ---------- */}
         <section className="py-20 sm:py-24">
           <div className="mx-auto max-w-7xl px-5 sm:px-8">
             <div className="relative overflow-hidden rounded-[2rem] bg-emerald-950 px-6 py-14 text-center sm:px-12 sm:py-20">
@@ -293,6 +294,7 @@ export default async function LandingPage() {
         </section>
       </main>
 
+      {/* Footer with brand and links */}
       <footer className="border-t border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
         <div className="mx-auto flex max-w-7xl flex-col gap-8 px-5 py-10 sm:px-8 md:flex-row md:items-start md:justify-between">
           <div className="max-w-sm">
@@ -317,6 +319,7 @@ export default async function LandingPage() {
   );
 }
 
+// Questions and answers for the FAQ section.
 const FAQ = [
   {
     q: "Do I need to know programming?",
@@ -344,6 +347,7 @@ const FAQ = [
   },
 ];
 
+// Small label, big title and intro text at the top of a section.
 function SectionIntro({ eyebrow, title, text, center = false }: { eyebrow: string; title: string; text: string; center?: boolean }) {
   return (
     <div className={center ? "mx-auto max-w-2xl text-center" : "max-w-2xl"}>
@@ -354,6 +358,7 @@ function SectionIntro({ eyebrow, title, text, center = false }: { eyebrow: strin
   );
 }
 
+// Icon colours for the feature cards.
 const TONES = {
   sky: "bg-sky-50 text-sky-600 dark:bg-sky-500/10 dark:text-sky-400",
   emerald: "bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400",
@@ -361,6 +366,7 @@ const TONES = {
   amber: "bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400",
 };
 
+// One feature card with icon, title, text and an optional preview.
 function FeatureCard({
   icon: Icon,
   tone,
@@ -390,9 +396,9 @@ function FeatureCard({
   );
 }
 
-/** Moisture over a day: dries out, gets watered back to the stop level. */
+// Fake moisture chart for one day: soil dries, then gets watered back up.
 function WateringMock() {
-  // A saw-tooth: slow drying, quick refill when it crosses 40%.
+  // Sample values: slow drying, quick refill when it drops below 40%.
   const points = [66, 62, 58, 54, 50, 46, 42, 39, 67, 63, 59, 55, 51, 47, 43, 39, 66, 62];
   const w = 260;
   const h = 120;
@@ -422,8 +428,9 @@ function WateringMock() {
   );
 }
 
-/** Hero: a pot card as it looks in the app, plus a Telegram alert and a leaf-scan result. */
+// Hero preview: a sample pot card, Telegram alert and leaf-scan result.
 function HeroPreview() {
+  // Sample moisture value and ring circle size.
   const value = 38;
   const r = 44;
   const c = 2 * Math.PI * r;
@@ -431,7 +438,7 @@ function HeroPreview() {
     <div aria-label="Example of SmartAgri watering a pot" className="relative mx-auto w-full max-w-lg sm:pb-24 sm:pt-20 lg:max-w-none">
       <div aria-hidden="true" className="absolute -inset-8 -z-10 rounded-[3rem] bg-emerald-300/30 blur-3xl dark:bg-emerald-800/20" />
 
-      {/* Pot card */}
+      {/* Sample pot card with a moisture ring */}
       <div className="relative rounded-[1.75rem] border border-white/70 bg-white/95 p-5 shadow-2xl sm:mx-6 shadow-emerald-950/10 backdrop-blur sm:p-6 dark:border-slate-700/70 dark:bg-slate-900/95">
         <div className="flex items-center gap-3">
           <span className="grid h-11 w-11 place-items-center rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400">
@@ -484,7 +491,7 @@ function HeroPreview() {
         </div>
       </div>
 
-      {/* Telegram alert */}
+      {/* Sample Telegram alert */}
       <div className="relative z-10 -mt-3 ml-auto w-[88%] rounded-2xl border border-slate-200 bg-white p-3.5 shadow-xl shadow-slate-950/10 sm:absolute sm:right-0 sm:top-2 sm:mt-0 sm:w-72 dark:border-slate-700 dark:bg-slate-900">
         <div className="flex items-start gap-3">
           <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-sky-500 text-white">
@@ -499,7 +506,7 @@ function HeroPreview() {
         </div>
       </div>
 
-      {/* Leaf scan */}
+      {/* Sample leaf scan result */}
       <div className="relative z-10 mt-3 w-[92%] rounded-2xl border border-slate-200 bg-white p-3.5 shadow-xl shadow-slate-950/10 sm:absolute sm:bottom-2 sm:left-0 sm:mt-0 sm:w-80 dark:border-slate-700 dark:bg-slate-900">
         <div className="flex items-start gap-3">
           <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-violet-50 text-violet-600 dark:bg-violet-500/10 dark:text-violet-300">

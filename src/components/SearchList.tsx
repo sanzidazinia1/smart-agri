@@ -1,12 +1,10 @@
 "use client";
 
-// Search box + scrolling list for dropdown pickers (gardens, pots, …). Renders
-// at most MAX_RESULTS rows so it stays fast with 1,000+ items; typing filters
-// by each item's keywords, with title-prefix matches first. ↑/↓/Enter work.
-// Mount it only while the dropdown is open — the query resets on unmount.
+// Search box + scrolling list for dropdown pickers; arrow keys + Enter work
 import { useId, useMemo, useState, type ReactNode } from "react";
 import { Check, Search, type LucideIcon } from "lucide-react";
 
+// One row in the list
 export interface SearchItem {
   id: string;
   title: string;
@@ -18,8 +16,10 @@ export interface SearchItem {
   disabled?: boolean;
 }
 
+// Show at most this many rows so huge lists stay fast
 const MAX_RESULTS = 100;
 
+// Search box and list; mount only while the dropdown is open
 export function SearchList({
   items,
   onChoose,
@@ -42,10 +42,12 @@ export function SearchList({
   subtitleIcon?: LucideIcon;
   footer?: ReactNode;
 }) {
+  // Typed search text, keyboard-highlighted row, and an id for accessibility
   const [query, setQuery] = useState("");
   const [highlight, setHighlight] = useState(0);
   const listId = useId();
 
+  // Filter items by the search text; title matches come first
   const matches = useMemo(() => {
     const needle = query.trim().toLowerCase();
     if (!needle) return items;
@@ -59,15 +61,19 @@ export function SearchList({
     return [...starts, ...contains];
   }, [items, query]);
 
+  // Rows to show: pinned rows (when not searching) plus the first matches
   const shown = [...(query.trim() ? [] : pinned), ...matches.slice(0, MAX_RESULTS)];
+  // Unique HTML id for each row
   const optionId = (item: SearchItem) => `${listId}-${item.id}`;
 
+  // Move the highlight to a row and scroll it into view
   function move(next: number) {
     const index = Math.max(0, Math.min(next, shown.length - 1));
     setHighlight(index);
     if (shown[index]) document.getElementById(optionId(shown[index]))?.scrollIntoView({ block: "nearest" });
   }
 
+  // Keyboard: arrows move the highlight, Enter picks the row
   function onKeyDown(event: React.KeyboardEvent) {
     if (event.key === "ArrowDown") {
       event.preventDefault();
@@ -84,6 +90,7 @@ export function SearchList({
 
   return (
     <>
+      {/* Search box */}
       <div className="border-b border-slate-100 p-2 dark:border-slate-800">
         {heading ? <p className="px-1 pb-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">{heading}</p> : null}
         <label className="relative block">
@@ -107,6 +114,7 @@ export function SearchList({
           />
         </label>
       </div>
+      {/* Result rows */}
       <ul id={listId} role="listbox" className="max-h-72 overflow-y-auto p-1 [scrollbar-width:thin]">
         {shown.length === 0 ? (
           <li className="px-3 py-6 text-center text-sm text-slate-400">
@@ -150,6 +158,7 @@ export function SearchList({
           })
         )}
       </ul>
+      {/* Note shown when there are more matches than rows shown */}
       {matches.length > MAX_RESULTS ? (
         <p className="border-t border-slate-100 px-3 py-2 text-[11px] text-slate-400 dark:border-slate-800">
           Showing {MAX_RESULTS} of {matches.length.toLocaleString()} — type to narrow down.

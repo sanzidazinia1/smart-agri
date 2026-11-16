@@ -1,13 +1,13 @@
-// TASK: Proposal Feature 5 — Crop Health Score (0–100).
-// WHAT: Combines the latest environment readings with the most recent disease
-//       contribution (computeHealthScore in lib/health-score.ts).
+// API /api/health-score: crop health score (0–100) from sensors and disease scans
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/api-auth";
 import { prisma } from "@/lib/db";
 import { computeHealthScore } from "@/lib/health-score";
 import { getLatestEnvironment } from "@/server/readings";
 
+// GET: combine latest readings with the last disease result into one score
 export async function GET(req: Request) {
+  // Auth check: only logged-in users
   const gate = await requireUser();
   if (gate instanceof NextResponse) return gate;
   const userId = gate;
@@ -25,6 +25,7 @@ export async function GET(req: Request) {
       }),
     ]);
 
+    // No data at all yet: return an empty score
     if (env.recordedAt === null && !latestDisease) {
       return NextResponse.json({
         healthScore: 0,

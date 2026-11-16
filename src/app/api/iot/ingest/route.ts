@@ -1,8 +1,4 @@
-// ============================================================================
-// PHASE 5: Pot-level soil moisture + garden-level temperature ingest.
-// WHAT: ESP32 devices POST authenticated telemetry here. Soil moisture belongs
-//       to a Pot in the same Garden as the Device; temperature stays Garden-wide.
-// ============================================================================
+// API /api/iot/ingest: ESP32 sends soil (per pot) and weather (per garden) here
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
@@ -16,6 +12,7 @@ import { createAppNotification } from "@/lib/notify";
 import { MAX_PORTS, pickPotForReading } from "@/lib/device-pot";
 import type { Metric, Prisma } from "@prisma/client";
 
+// Validation schema: readings sent as one object, e.g. { temperature: 30 }
 const metricObjectSchema = z
   .object({
     soil_moisture: z.number().min(0).max(100).optional(),
@@ -26,8 +23,10 @@ const metricObjectSchema = z
   })
   .passthrough();
 
+// A board port number, 1 to MAX_PORTS
 const portSchema = z.number().int().min(1).max(MAX_PORTS);
 
+// Validation schema: one pot's reading (moisture and pump state)
 const potReadingSchema = z
   .object({
     // A multi-pot board sends its port; the simulator / older clients may send potId.
@@ -40,6 +39,7 @@ const potReadingSchema = z
   })
   .passthrough();
 
+// Validation schema: the full message body the board sends
 const bodySchema = z
   .object({
     hardwareId: z.string().min(1).optional(),
@@ -48,7 +48,7 @@ const bodySchema = z
     port: portSchema.optional(),
     // How many ports (pots) this board serves — firmware 2.7+.
     ports: portSchema.optional(),
-    // e.g. "smartagri-2.9" — shown in the app, and tells it whether ports can be set remotely.
+    // e.g. "smartagri-2.9"; also tells if ports can be set from the app.
     firmware: z.string().trim().max(40).optional(),
     soilMoisture: z.number().min(0).max(100).optional(),
     // Canonical wire format. Keep soilMoisture for deployed legacy clients.
@@ -66,6 +66,7 @@ const bodySchema = z
     message: "hardwareId or deviceId is required",
   });
 
+// Unit saved with each kind of reading
 const UNITS: Partial<Record<Metric, string>> = {
   soil_moisture: "%",
   temperature: "C",
@@ -75,16 +76,17 @@ const UNITS: Partial<Record<Metric, string>> = {
   valve_state: "boolean",
 };
 
-// Automatic actions are based only on recent readings. We still retain stale
-// telemetry for diagnostics, but it cannot change a relay state.
+// Safety: only readings under 10 min old may switch the pump (old ones are kept)
 const FRESH_MOISTURE_WINDOW_MS = 10 * 60 * 1000;
 const FUTURE_READING_TOLERANCE_MS = 60 * 1000;
 
+// True if the reading is recent enough to act on
 function isFreshMoistureReading(recordedAt: Date) {
   const ageMs = Date.now() - recordedAt.getTime();
   return ageMs >= -FUTURE_READING_TOLERANCE_MS && ageMs <= FRESH_MOISTURE_WINDOW_MS;
 }
 
+// One pot's reading after cleaning up the different input formats
 type PotReadingInput = {
   potId?: string;
   port?: number;
@@ -92,19 +94,22 @@ type PotReadingInput = {
   pump?: boolean;
 };
 
+// Turn 0–1 values into 0–100 percent
 function normalizeMoisture(value: number) {
   return value <= 1 ? Math.round(value * 100) : value;
 }
 
+// Use "readings" only when it is an object, not a list
 function getObjectReadings(readings: unknown) {
   return readings && !Array.isArray(readings) ? readings : undefined;
 }
 
+// Moisture may arrive under any of three names
 function getPotReadingMoisture(reading: z.infer<typeof potReadingSchema>) {
   return reading.soilMoisture ?? reading.soil_moisture ?? reading.moisture;
 }
 
-/** What each port reported (probe reading or null, pump state) — shown on the Devices page. */
+/** Each port's moisture and pump state, shown on the Devices page. */
 function getPortStatus(readings: unknown) {
   if (!Array.isArray(readings)) return null;
   const ports = (readings as z.infer<typeof potReadingSchema>[])
@@ -117,7 +122,7 @@ function getPortStatus(readings: unknown) {
   return ports.length ? ports : null;
 }
 
-/** The pot a reading belongs to; null = it came from a port that isn't connected (skip it). */
+/** Find the reading's pot; null means an unconnected port (skip it). */
 async function resolvePotId(
   input: PotReadingInput,
   device: { id: string; userId: string; gardenId: string },
@@ -136,8 +141,7 @@ async function resolvePotId(
       throw new Error(`Invalid pot/device combination for potId ${input.potId}`);
     }
 
-    // Readings may name a pot (multi-pot nodes, the simulator), but only a pot
-    // the user connected this device to in the app. Never link automatically.
+    // Security: only accept pots the user linked to this device; never auto-link
     const connected = await prisma.devicePotMapping.findUnique({
       where: { deviceId_potId: { deviceId: device.id, potId: pot.id } },
       select: { id: true },
@@ -148,6 +152,7 @@ async function resolvePotId(
     return pot.id;
   }
 
+  // No potId sent: work it out from the port and the device's pot links
   const links = await prisma.devicePotMapping.findMany({
     where: { deviceId: device.id, pot: { userId: device.userId, gardenId: device.gardenId } },
     select: { potId: true, port: true },
@@ -157,6 +162,7 @@ async function resolvePotId(
   throw new Error("potId is required for soil moisture readings: connect this device to one pot or send potId");
 }
 
+// Load a pot's watering mode, thresholds and pump state
 async function getPotIrrigationConfig(
   potId: string,
   device: { userId: string; gardenId: string },
@@ -173,8 +179,10 @@ async function getPotIrrigationConfig(
   });
 }
 
+// POST: save a reading, then decide if each pot's pump should run
 export async function POST(req: Request) {
   try {
+    // Device auth: the board sends its secret key in the x-device-key header
     const key = req.headers.get("x-device-key");
     if (!key) {
       return NextResponse.json({ error: "Missing device key" }, { status: 401 });
@@ -203,6 +211,7 @@ export async function POST(req: Request) {
       );
     }
 
+    // Find the device and check its key hash matches
     const found = await prisma.device.findUnique({
       where: { hardwareId },
       select: {
@@ -249,6 +258,7 @@ export async function POST(req: Request) {
       | z.infer<typeof metricObjectSchema>
       | undefined;
 
+    // Garden-wide readings: temperature, humidity, rain, light
     const gardenEntries: { metric: Metric; value: number }[] = [];
     const temperature = parsed.data.temperature ?? objectReadings?.temperature;
     const humidity = parsed.data.humidity ?? objectReadings?.humidity;
@@ -261,6 +271,7 @@ export async function POST(req: Request) {
     if (rain !== undefined) gardenEntries.push({ metric: "rain", value: rain });
     if (light !== undefined) gardenEntries.push({ metric: "light", value: light });
 
+    // Pot readings: one top-level reading and/or a list (one per port)
     const potInputs: PotReadingInput[] = [];
     const topLevelMoisture =
       parsed.data.soil_moisture ??
@@ -296,6 +307,7 @@ export async function POST(req: Request) {
       );
     }
 
+    // Rows to save in the Reading table, starting with the garden readings
     const data: Prisma.ReadingCreateManyInput[] = gardenEntries.map((entry) => ({
       userId: device.userId,
       gardenId: device.gardenId,
@@ -315,6 +327,7 @@ export async function POST(req: Request) {
       reason: string;
     }[] = [];
     const unconnectedPorts: number[] = [];
+    // Handle each pot reading: find its pot, save it, decide the pump
     for (const input of potInputs) {
       let potId: string | null;
       try {
@@ -333,10 +346,7 @@ export async function POST(req: Request) {
         continue;
       }
 
-      // The board is the source of truth for its relay. It switches the pump
-      // OFF on every restart (and on communication loss), so if it reports a
-      // state different from ours while no command is on its way, adopt it —
-      // otherwise automatic mode would never re-issue PUMP_ON.
+      // Board knows its real pump state; copy it if no command is on the way
       if (input.pump !== undefined) {
         const reported = input.pump ? "on" : "off";
         const inFlight = await prisma.deviceCommand.count({
@@ -364,6 +374,7 @@ export async function POST(req: Request) {
           recordedAt,
         });
 
+        // Auto-watering: old readings never switch the pump
         const potConfig = await getPotIrrigationConfig(potId, device);
         if (potConfig) {
           if (!isFreshMoistureReading(recordedAt)) {
@@ -375,6 +386,7 @@ export async function POST(req: Request) {
               reason: "SOIL_MOISTURE_STALE",
             });
           } else {
+            // Compare moisture with the pot's on/off thresholds
             const decision = decidePotIrrigation({
               moisture,
               config: potConfig,
@@ -387,6 +399,7 @@ export async function POST(req: Request) {
               reason: decision.reason,
             });
 
+            // Pump should change: queue a command for the board to pick up
             if (decision.changed) {
               await queuePumpCommand({
                 userId: device.userId,
@@ -404,6 +417,7 @@ export async function POST(req: Request) {
         }
       }
 
+      // Also log the pump state as a reading
       if (input.pump !== undefined) {
         data.push({
           userId: device.userId,
@@ -422,6 +436,7 @@ export async function POST(req: Request) {
     const receivedAt = new Date();
     // A port count chosen in the app wins; the board catches up on its next poll.
     const reportedPorts = device.desiredPorts == null ? parsed.data.ports : undefined;
+    // DB write: save readings and device info all-or-nothing
     await prisma.$transaction(async (tx) => {
       if (data.length) await tx.reading.createMany({ data });
       if (reportedPorts) {
@@ -433,13 +448,12 @@ export async function POST(req: Request) {
           data: { ...(portStatus ? { portStatus } : {}), ...(parsed.data.firmware ? { firmwareVersion: parsed.data.firmware } : {}) },
         });
       }
-      // Check the current row inside the transaction rather than trusting the
-      // earlier read: an offline-monitor invocation may have transitioned it
-      // while this valid telemetry request was being prepared.
+      // Was it OFFLINE? Re-check here, as the offline monitor may have just run
       const recovered = await tx.device.updateMany({
         where: { id: device.id, status: "OFFLINE" },
         data: { lastSeenAt: receivedAt, status: "ONLINE" },
       });
+      // Back online: send a Telegram message and an app notification
       if (recovered.count === 1 && device.lastSeenAt) {
         await enqueueTelegramDelivery(tx, {
           userId: device.userId,
@@ -457,7 +471,7 @@ export async function POST(req: Request) {
           actionUrl: "/sensors",
         });
       } else if (recovered.count === 0) {
-        // Valid, authenticated telemetry is a successful backend receipt.
+        // A valid reading means the board is online: update last seen
         await tx.device.update({ where: { id: device.id }, data: { lastSeenAt: receivedAt, status: "ONLINE" } });
       }
     });

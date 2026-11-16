@@ -1,11 +1,4 @@
-// TASK: Device pairing — called by an unpaired ESP32 every few seconds.
-// The board announces { hardwareId, secret, pairingCode }. Answers:
-//   { status: "waiting" }  — not claimed yet;
-//   { status: "confirm" }  — the user asked to claim it: blink and wait for
-//                            the BOOT button, then call again with confirm:true;
-//   { status: "claimed", deviceKey } — the key, handed over exactly once.
-// No user session: the secret proves it's the same board that announced, and
-// the physical button press (or the pairing code) proves the user owns it.
+// API /api/iot/pair: a new ESP32 announces itself here until it gets its key
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
@@ -20,6 +13,7 @@ import {
   normalizePairingCode,
 } from "@/lib/device-pairing";
 
+// Validation schema: what the board sends each time it announces
 const schema = z.object({
   hardwareId: z.string().trim(),
   secret: z.string().trim(),
@@ -28,17 +22,21 @@ const schema = z.object({
   confirm: z.boolean().optional(),
 });
 
+// POST: reply "waiting", "confirm" (press BOOT) or "claimed" with the key once
 export async function POST(req: Request) {
+  // Security: no login; board's secret + BOOT press (or code) prove ownership
   const parsed = schema.safeParse(await req.json().catch(() => null));
   const code = parsed.success ? normalizePairingCode(parsed.data.pairingCode) : null;
   if (!parsed.success || !code || !isValidHardwareId(parsed.data.hardwareId) || !isValidSecret(parsed.data.secret)) {
     return NextResponse.json({ error: "Invalid pairing announcement" }, { status: 400 });
   }
   const { hardwareId, secret, firmware, confirm } = parsed.data;
+  // Only the secret's hash is stored and compared
   const secretHash = hashPairingSecret(secret);
   const now = new Date();
 
   const existing = await prisma.devicePairing.findUnique({ where: { hardwareId } });
+  // Decide: hand over the key, start fresh, or just note the board is alive
   const action = announceAction(existing, secretHash, now);
 
   if (action === "deliver" && existing) {
@@ -50,6 +48,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ status: "claimed", deviceKey: existing.pendingKey, hardwareId });
   }
 
+  // New or reset board: (re)create its pairing record and wait to be claimed
   if (action === "reset") {
     await prisma.devicePairing.upsert({
       where: { hardwareId },
@@ -73,7 +72,7 @@ export async function POST(req: Request) {
 
   await prisma.devicePairing.update({ where: { hardwareId }, data: { lastSeenAt: now, firmware } });
 
-  // Button claim in progress?
+  // User asked to claim it: wait for BOOT press, then finish the claim
   if (existing && isConfirmPending(existing.confirmRequestedAt, now) && existing.requestUserId) {
     if (!confirm) {
       const msLeft = CONFIRM_WINDOW_MS - (now.getTime() - existing.confirmRequestedAt!.getTime());

@@ -1,4 +1,4 @@
-// TASK: Domain CRUD — Pots (physical containers inside a garden).
+// API /api/pots: list the user's pots and create new ones
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireUser } from "@/lib/api-auth";
@@ -6,7 +6,9 @@ import { prisma } from "@/lib/db";
 import { nextPotNumber, potCode } from "@/lib/pot-number";
 import { getDeviceConnectionStatus } from "@/lib/device-status";
 
+// GET: list pots with plant, sensor, latest moisture and latest pump command
 export async function GET(req: Request) {
+  // Auth check: only logged-in users
   const gate = await requireUser();
   if (gate instanceof NextResponse) return gate;
   const { searchParams } = new URL(req.url);
@@ -14,6 +16,7 @@ export async function GET(req: Request) {
   const availableForPlant = searchParams.get("availableForPlant") === "true";
   const currentPlantId = searchParams.get("currentPlantId") || undefined;
 
+  // availableForPlant=true: only empty pots (plus the current plant's pot)
   const pots = await prisma.pot.findMany({
     where: {
       userId: gate,
@@ -64,6 +67,7 @@ export async function GET(req: Request) {
   );
 }
 
+// Validation schema: data needed to create a pot
 const schema = z.object({
   gardenId: z.string().min(1),
   label: z.string().trim().max(60).optional(),
@@ -74,6 +78,7 @@ const schema = z.object({
   position: z.string().optional(),
 });
 
+// POST: create a pot with the next serial number (e.g. "POT-4" if no label)
 export async function POST(req: Request) {
   const gate = await requireUser();
   if (gate instanceof NextResponse) return gate;
@@ -91,6 +96,7 @@ export async function POST(req: Request) {
     if (!garden) {
       return NextResponse.json({ error: "Garden not found" }, { status: 404 });
     }
+    // DB write: get the next number and create the pot together
     const pot = await prisma.$transaction(async (tx) => {
       const number = await nextPotNumber(tx, userId);
       return tx.pot.create({ data: { ...parsed.data, label: parsed.data.label || potCode(number), number, userId } });

@@ -1,8 +1,4 @@
-// Root certificate authorities the board trusts for https:// servers.
-// Generated from the macOS system trust store (2026-11). Covers Vercel:
-//   *.vercel.app      -> Google Trust Services (GTS Root R1, also via GlobalSign Root CA)
-//   custom domains    -> Let's Encrypt (ISRG Root X1 / X2)
-// Add another root here (PEM) if you host the app elsewhere.
+// Trusted root certificates so the board can safely talk to the HTTPS server.
 #pragma once
 
 static const char ROOT_CA_BUNDLE[] =

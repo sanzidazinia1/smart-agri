@@ -1,11 +1,13 @@
-// TASK: Alerts/Notifications — list user notifications and mark read (one/all).
+// API /api/notifications: list the user's notifications and mark them read
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireUser } from "@/lib/api-auth";
 import { prisma } from "@/lib/db";
 import { sweepUserNotifications } from "@/lib/app-notifications";
 
+// GET: check for new problems, then return the latest 50 notifications
 export async function GET() {
+  // Auth check: only logged-in users
   const gate = await requireUser();
   if (gate instanceof NextResponse) return gate;
   // Pick up conditions (dry pots, silent probes, offline boards) before listing.
@@ -18,9 +20,10 @@ export async function GET() {
   return NextResponse.json(notifications);
 }
 
-// Mark notification(s) as read.
+// Validation schema: one notification id, or all: true
 const schema = z.object({ id: z.string().optional(), all: z.boolean().optional() });
 
+// PATCH: mark one notification (or all unread ones) as read
 export async function PATCH(req: Request) {
   const gate = await requireUser();
   if (gate instanceof NextResponse) return gate;

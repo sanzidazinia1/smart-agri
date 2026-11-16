@@ -1,6 +1,8 @@
+// Server helper that fetches the latest sensor readings for the dashboard.
 import { prisma } from "@/lib/db";
 import type { Metric } from "@prisma/client";
 
+// Newest value of each sensor reading (null = no reading yet)
 export interface LatestEnvironment {
   moisture: number | null;
   temperature: number | null;
@@ -10,6 +12,7 @@ export interface LatestEnvironment {
   recordedAt: Date | null;
 }
 
+// The sensor metrics we look up
 const ENV_METRICS: Metric[] = [
   "soil_moisture",
   "temperature",
@@ -18,10 +21,7 @@ const ENV_METRICS: Metric[] = [
   "rain",
 ];
 
-/**
- * Latest value for each environmental metric for a user (optionally scoped to
- * one garden). One indexed query per metric — cheap given low write volume.
- */
+// Gets the newest value of each metric for a user (optionally one garden)
 export async function getLatestEnvironment(
   userId: string,
   gardenId?: string,
@@ -36,6 +36,7 @@ export async function getLatestEnvironment(
     ),
   );
 
+  // Use the newest time among all metrics as the "last updated" time
   const [moisture, temperature, humidity, light, rain] = rows;
   const recordedAt = rows
     .map((r) => r?.recordedAt)
@@ -50,21 +51,4 @@ export async function getLatestEnvironment(
     rain: rain?.value ?? null,
     recordedAt: recordedAt ?? null,
   };
-}
-
-/**
- * Time-series rows for charting, newest first.
- */
-export async function getReadingSeries(
-  userId: string,
-  metric: Metric,
-  limit = 50,
-  gardenId?: string,
-) {
-  return prisma.reading.findMany({
-    where: { userId, metric, ...(gardenId ? { gardenId } : {}) },
-    orderBy: { recordedAt: "desc" },
-    take: limit,
-    select: { value: true, recordedAt: true },
-  });
 }

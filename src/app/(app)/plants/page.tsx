@@ -1,7 +1,6 @@
 "use client";
 
-// PAGE: Plants across all gardens — health and growth at a glance, growing
-// guidance from the plant catalog, and manage each plant from its ⋮ menu.
+// Plants page: every plant with its health, growth stage and growing guide.
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import useSWR from "swr";
@@ -15,6 +14,7 @@ import { SOIL_LABELS, findPlantProfile, type SoilType } from "@/lib/plant-catalo
 import { apiDelete } from "@/lib/api-client";
 import { GROWTH_STAGES } from "@/lib/growth-stages";
 
+// A garden, used for the garden filter dropdown.
 interface Garden {
   id: string;
   name: string;
@@ -22,6 +22,7 @@ interface Garden {
   type: string;
 }
 
+// A plant with its garden and the pot it lives in.
 interface Plant {
   id: string;
   gardenId: string;
@@ -43,26 +44,33 @@ interface Plant {
   };
 }
 
+// Health filter options, growth stages list and paging/time constants.
 type HealthFilter = "all" | "healthy" | "care" | "unknown";
 const STAGES = GROWTH_STAGES;
 const PAGE_SIZE = 12;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+// True if the plant is sick, at risk or recovering.
 const needsCare = (plant: Plant) => ["diseased", "at_risk", "recovering"].includes(plant.healthStatus);
 
+// Groups a plant into healthy / needs care / not checked.
 function healthBucket(plant: Plant): Exclude<HealthFilter, "all"> {
   if (plant.healthStatus === "healthy") return "healthy";
   if (needsCare(plant)) return "care";
   return "unknown";
 }
 
+// Turns "at_risk" into "At risk" for display.
 const label = (value: string) => value.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
 
+// The plants page component.
 export default function PlantsPage() {
   const { confirm, toast } = useFeedback();
+  // Load gardens once and plants every 15 seconds.
   const { data: gardens } = useSWR<Garden[]>("/api/gardens");
   const { data: plants, mutate } = useSWR<Plant[]>("/api/plants", { refreshInterval: 15000 });
   const now = useNow(60000);
+  // Search, filter, paging and "editing which plant" state.
   const [query, setQuery] = useState("");
   const [gardenFilter, setGardenFilter] = useState("all");
   const [healthFilter, setHealthFilter] = useState<HealthFilter>("all");
@@ -70,6 +78,7 @@ export default function PlantsPage() {
   const [shown, setShown] = useState(PAGE_SIZE);
   const [editing, setEditing] = useState<Plant | null>(null);
 
+  // Numbers shown on the summary tiles.
   const counts = useMemo(() => {
     const list = plants ?? [];
     return {
@@ -80,6 +89,7 @@ export default function PlantsPage() {
     };
   }, [plants]);
 
+  // Plants after search + filters.
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return (plants ?? [])
@@ -98,12 +108,15 @@ export default function PlantsPage() {
   }, [plants, gardenFilter, healthFilter, stageFilter, query]);
 
   const filtersActive = query.trim() !== "" || gardenFilter !== "all" || healthFilter !== "all" || stageFilter !== "all";
+  // Go back to the first page of results.
   const resetPaging = () => setShown(PAGE_SIZE);
+  // Clicking a tile turns its filter on, or off if already on.
   const toggle = (value: HealthFilter) => {
     setHealthFilter(healthFilter === value ? "all" : value);
     resetPaging();
   };
 
+  // Asks for confirmation, then deletes the plant (the pot stays).
   async function remove(plant: Plant) {
     const ok = await confirm({
       title: `Delete ${plant.commonName}?`,
@@ -129,6 +142,7 @@ export default function PlantsPage() {
         action={<PlantingLauncher gardens={gardens ?? []} gardenId={gardenFilter} onCreated={() => mutate()} />}
       />
 
+      {/* Summary tiles (also act as quick filters) */}
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Tile icon={Flower2} label="Plants" value={counts.total} active={healthFilter === "all"} onClick={() => toggle("all")} />
         <Tile icon={HeartPulse} label="Healthy" value={counts.healthy} active={healthFilter === "healthy"} onClick={() => toggle("healthy")} />
@@ -136,6 +150,7 @@ export default function PlantsPage() {
         <Tile icon={CircleHelp} label="Health not checked" value={counts.unknown} active={healthFilter === "unknown"} onClick={() => toggle("unknown")} />
       </div>
 
+      {/* Search box and filters */}
       <Toolbar
         query={query}
         onQuery={(value) => {
@@ -176,6 +191,7 @@ export default function PlantsPage() {
         }}
       />
 
+      {/* Plant cards: loading, empty, no matches or the grid */}
       {!plants ? (
         <SkeletonGrid />
       ) : plants.length === 0 ? (
@@ -193,6 +209,7 @@ export default function PlantsPage() {
         </>
       )}
 
+      {/* Slide-over panel for editing the plant and its pot */}
       <EditPotPanel
         open={editing !== null}
         onClose={() => setEditing(null)}
@@ -218,11 +235,15 @@ export default function PlantsPage() {
   );
 }
 
+// One plant card: name, health, age and the catalog growing guide.
 function PlantCard({ plant, now, onEdit, onDelete }: { plant: Plant; now: number; onEdit: () => void; onDelete: () => void }) {
+  // Growing guide from the plant catalog (if we know this plant).
   const profile = findPlantProfile(plant.commonName);
   const scientific = plant.scientificName ?? profile?.scientificName;
   const since = plant.plantedAt ?? plant.createdAt;
+  // How many days since planting.
   const days = Math.max(0, Math.floor((now - new Date(since).getTime()) / DAY_MS));
+  // Does the pot's soil match what the plant prefers?
   const soilOk = profile ? plant.pot.soilType === profile.soil : null;
   const potHref = `/gardens/${plant.gardenId}?tab=pots&pot=${plant.pot.id}`;
 
@@ -250,6 +271,7 @@ function PlantCard({ plant, now, onEdit, onDelete }: { plant: Plant; now: number
         />
       </header>
 
+      {/* Health, growth stage and age pills */}
       <div className="flex flex-wrap gap-1.5 px-4">
         <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${HEALTH_PILL[plant.healthStatus] ?? HEALTH_PILL.unknown}`}>
           {plant.healthStatus === "unknown" ? "Health not checked" : label(plant.healthStatus)}
@@ -263,6 +285,7 @@ function PlantCard({ plant, now, onEdit, onDelete }: { plant: Plant; now: number
         </span>
       </div>
 
+      {/* Growing guide: soil, moisture, sun and temperature */}
       {profile ? (
         <dl className="mx-4 mt-3 grid grid-cols-2 gap-x-3 gap-y-2 rounded-xl bg-slate-50 p-3 text-[11px] dark:bg-slate-950/60">
           <div>
@@ -292,6 +315,7 @@ function PlantCard({ plant, now, onEdit, onDelete }: { plant: Plant; now: number
         </p>
       )}
 
+      {/* Link to the plant's pot */}
       <footer className="mt-4 flex items-center justify-between gap-2 border-t border-slate-100 px-4 py-2.5 text-[11px] dark:border-slate-800">
         <Link href={potHref} className="flex min-w-0 items-center gap-1.5 font-semibold text-slate-600 hover:text-emerald-600 dark:text-slate-300 dark:hover:text-emerald-400">
           <Package size={12} className="shrink-0" />

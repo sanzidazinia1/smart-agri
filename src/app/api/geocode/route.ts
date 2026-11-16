@@ -1,12 +1,8 @@
-// TASK: Place search + reverse geocoding for the garden location picker.
-// Proxies OpenStreetMap Nominatim so the browser never calls it directly; the
-// server identifies itself, caches answers and spaces requests >= 1s apart as
-// the Nominatim usage policy requires.
-//   GET /api/geocode?q=Savar[&near=23.8,90.4] -> [{ label, detail, lat, lng }]
-//   GET /api/geocode?lat=23.8&lng=90.4 -> { label }
+// API /api/geocode: place search and "what place is this?" for the garden map
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/api-auth";
 
+// OpenStreetMap Nominatim settings: max 1 call/sec, 24h cache (their policy)
 const BASE_URL = process.env.NOMINATIM_BASE_URL || "https://nominatim.openstreetmap.org";
 const USER_AGENT = "SmartAgri/0.1 (garden location picker)";
 const MIN_INTERVAL_MS = 1100;
@@ -16,10 +12,12 @@ const CACHE_MAX_ENTRIES = 500;
 // Half-width (degrees) of the box around `near` that search results favour.
 const NEAR_BIAS_DEGREES = 1.5;
 
+// In-memory cache and a queue so calls go out one at a time
 const cache = new Map<string, { at: number; value: unknown }>();
 let queue: Promise<unknown> = Promise.resolve();
 let lastRequestAt = 0;
 
+// The parts of a Nominatim place result that we use
 interface NominatimPlace {
   lat: string;
   lon: string;
@@ -39,6 +37,7 @@ function throttled<T>(task: () => Promise<T>): Promise<T> {
   return run;
 }
 
+// Return a saved answer if fresh, else fetch it (throttled) and save it
 async function cached<T>(key: string, load: () => Promise<T>): Promise<T> {
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.value as T;
@@ -48,6 +47,7 @@ async function cached<T>(key: string, load: () => Promise<T>): Promise<T> {
   return value;
 }
 
+// Call Nominatim from the server so the browser never calls it directly
 async function nominatim<T>(path: string, params: Record<string, string>): Promise<T> {
   const url = new URL(path, BASE_URL);
   for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
@@ -82,7 +82,9 @@ function shortLabel(place: NominatimPlace) {
   return parts.length ? parts.join(", ") : place.display_name.split(",").slice(0, 2).join(",").trim();
 }
 
+// GET: ?q= searches places; ?lat=&lng= returns the area name for a point
 export async function GET(req: Request) {
+  // Auth check: only logged-in users
   const gate = await requireUser();
   if (gate instanceof NextResponse) return gate;
 
@@ -92,6 +94,7 @@ export async function GET(req: Request) {
   const lng = Number(params.get("lng"));
 
   try {
+    // Search by text, e.g. "Savar"
     if (q) {
       if (q.length < 3 || q.length > 120) return NextResponse.json([]);
       const search: Record<string, string> = { q, limit: "5", addressdetails: "1" };
@@ -116,6 +119,7 @@ export async function GET(req: Request) {
       );
     }
 
+    // Reverse lookup: coordinates to a place name
     if (params.has("lat") && params.has("lng")) {
       if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
         return NextResponse.json({ error: "Invalid coordinates" }, { status: 400 });

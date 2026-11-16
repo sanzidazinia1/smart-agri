@@ -1,8 +1,6 @@
 "use client";
 
-// PAGE: Analytics — one pot over a period: summary numbers, soil moisture
-// against its target band, waterings, garden weather and an activity log.
-// Export downloads the raw rows as Excel.
+// Analytics page: one pot's moisture, watering and weather charts over time.
 import { useState } from "react";
 import useSWR from "swr";
 import {
@@ -41,8 +39,10 @@ import { timeAgo } from "@/components/device-ui";
 import { useFeedback } from "@/components/Feedback";
 import { DateRangePicker } from "@/components/DatePicker";
 
+// Time periods the user can pick.
 type Range = "24h" | "7d" | "30d" | "custom";
 
+// Everything the analytics API returns for one pot and period.
 interface Overview {
   pot: {
     id: string;
@@ -73,6 +73,7 @@ interface Overview {
   events: { id: string; t: string; mode: string; kind: "on" | "off" | "mode" | "other"; title: string; detail: string }[];
 }
 
+// Buttons for the period switch.
 const RANGES: { value: Range; label: string }[] = [
   { value: "24h", label: "24 hours" },
   { value: "7d", label: "7 days" },
@@ -80,13 +81,14 @@ const RANGES: { value: Range; label: string }[] = [
   { value: "custom", label: "Custom" },
 ];
 
-// Chart colours: one series per chart, so one hue each; ink stays neutral.
+// Chart colours (one colour per data series).
 const MOISTURE = "#0284c7"; // sky-600
 const WATERING = "#0284c7";
 const TEMPERATURE = "#ea580c"; // orange-600
 const HUMIDITY = "#0d9488"; // teal-600
 const BAND = "#10b981"; // emerald-500 (target band, low opacity)
 
+// Turns seconds into short text like "2m 30s" or "1h 5m".
 function formatDuration(seconds: number) {
   if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);
@@ -94,27 +96,33 @@ function formatDuration(seconds: number) {
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
+// The analytics page: pot picker, period switch, export and the charts.
 export default function AnalyticsPage() {
   const { toast } = useFeedback();
+  // Load all pots and pick the chosen one (or the first).
   const { data: pots } = useSWR<PickerPot[]>("/api/pots");
   const [chosenPotId, setChosenPotId] = useState("");
   const sortedPots = [...(pots ?? [])].sort((a, b) => a.number - b.number);
   const pot = sortedPots.find((p) => p.id === chosenPotId) ?? sortedPots[0];
+  // Selected period, custom dates and export state.
   const [range, setRange] = useState<Range>("24h");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [exporting, setExporting] = useState(false);
 
+  // Error text if the custom dates are missing or in the wrong order.
   const customError = range !== "custom" ? "" : !from || !to ? "Pick the dates." : from > to ? "The end day must be after the start day." : "";
   // Whole days: from the start of the first day to the end of the last.
   const params = pot
     ? new URLSearchParams({ gardenId: pot.gardenId, potId: pot.id, range, ...(range === "custom" ? { from: `${from}T00:00`, to: `${to}T23:59:59` } : {}) }).toString()
     : "";
+  // Load the pot's analytics (auto-refresh every 30 s for the 24h view).
   const { data, error, isLoading } = useSWR<Overview>(pot && !customError ? `/api/analytics/pot?${params}` : null, {
     refreshInterval: range === "24h" ? 30000 : 0,
     keepPreviousData: true,
   });
 
+  // Downloads the pot's data for this period as an Excel file.
   async function exportExcel() {
     if (!pot || customError) return;
     setExporting(true);
@@ -213,6 +221,7 @@ export default function AnalyticsPage() {
         {isLoading && data ? <Loader2 size={16} className="animate-spin text-slate-400 lg:ml-auto" aria-label="Updating" /> : null}
       </div>
 
+      {/* Charts, or a message / loading placeholder */}
       {!pot ? null : customError ? (
         <EmptyPanel icon={Timer} text="Pick a start and end date to see this period." />
       ) : error ? (
@@ -226,25 +235,28 @@ export default function AnalyticsPage() {
   );
 }
 
+// All the stats and charts for the loaded data.
 function Dashboard({ data }: { data: Overview }) {
   const { summary, pot, range } = data;
   const on = pot.moistureOnThreshold;
   const off = pot.moistureOffThreshold;
   const hasMoisture = summary.readings > 0;
+  // Axis label: a date for long periods, a time for short ones.
   const tick = (iso: string) => {
     const d = new Date(iso);
     return range.daily || range.bucketSeconds >= 3600
       ? d.toLocaleDateString(undefined, { day: "numeric", month: "short" })
       : d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
   };
-  // Multi-day periods: one tick per day (the first bucket of each day), not repeated dates.
+  // For multi-day periods, show one axis label per day.
   const dayOf = (iso: string) => new Date(iso).toDateString();
   const dayTicks = range.daily || range.bucketSeconds >= 3600 ? data.moisture.filter((p, i) => i === 0 || dayOf(p.t) !== dayOf(data.moisture[i - 1].t)).map((p) => p.t) : undefined;
+  // Full date + time for tooltips and the activity log.
   const fullTime = (iso: string) => new Date(iso).toLocaleString(undefined, { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
 
   return (
     <div className="space-y-5">
-      {/* Summary */}
+      {/* Summary numbers */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         <Stat icon={Gauge} label="Now" value={summary.lastValue != null ? `${summary.lastValue}%` : "--"} hint={summary.lastReadingAt ? timeAgo(summary.lastReadingAt) : "No reading yet"} />
         <Stat icon={BarChart3} label="Average" value={summary.avg != null ? `${summary.avg}%` : "--"} hint={`${summary.readings.toLocaleString()} readings`} />
@@ -260,7 +272,7 @@ function Dashboard({ data }: { data: Overview }) {
         <Stat icon={Timer} label="Pump time" value={formatDuration(summary.pumpSeconds)} hint="Total running time" />
       </div>
 
-      {/* Soil moisture */}
+      {/* Soil moisture chart with the target range shaded */}
       <ChartCard
         title="Soil moisture"
         subtitle={`${pot.label} · ${pot.plant?.commonName ?? "No plant"} · ${pot.garden.name}`}
@@ -334,7 +346,7 @@ function Dashboard({ data }: { data: Overview }) {
       </ChartCard>
 
       <div className="grid gap-5 lg:grid-cols-2">
-        {/* Waterings */}
+        {/* Waterings bar chart */}
         <ChartCard title={range.daily ? "Waterings per day" : "Waterings per hour"} subtitle={`${summary.waterings} in this period · ${formatDuration(summary.pumpSeconds)} pump time`}>
           {summary.waterings ? (
             <ChartFrame height={200}>
@@ -382,7 +394,7 @@ function Dashboard({ data }: { data: Overview }) {
           )}
         </ChartCard>
 
-        {/* Weather: two small charts, never one chart with two axes */}
+        {/* Weather: two small charts (temperature and humidity) */}
         <ChartCard title="Garden weather" subtitle={pot.garden.name}>
           {data.weather.length ? (
             <div className="grid gap-4 sm:grid-cols-2">
@@ -395,13 +407,15 @@ function Dashboard({ data }: { data: Overview }) {
         </ChartCard>
       </div>
 
+      {/* Pump on/off and mode change log */}
       <ActivityLog events={data.events} fullTime={fullTime} />
     </div>
   );
 }
 
-// ---------- Pieces ----------
+// ---------- Small building blocks used above ----------
 
+// Sizes a chart to its box and sets light/dark chart colours.
 function ChartFrame({ height, children }: { height: number; children: React.ReactElement }) {
   return (
     <div
@@ -415,6 +429,7 @@ function ChartFrame({ height, children }: { height: number; children: React.Reac
   );
 }
 
+// Small line chart for one weather value, with the latest value on top.
 function MiniLine({
   data,
   dataKey,
@@ -467,6 +482,7 @@ function MiniLine({
   );
 }
 
+// The little popup box shown when hovering a chart.
 function TooltipBox({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs shadow-lg dark:border-slate-700 dark:bg-slate-900">
@@ -476,6 +492,7 @@ function TooltipBox({ title, children }: { title: string; children: React.ReactN
   );
 }
 
+// White card with a title, subtitle and optional legend around a chart.
 function ChartCard({ title, subtitle, legend, children }: { title: string; subtitle?: string; legend?: React.ReactNode; children: React.ReactNode }) {
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
@@ -491,12 +508,14 @@ function ChartCard({ title, subtitle, legend, children }: { title: string; subti
   );
 }
 
+// Text colours for good / warning / bad stats.
 const STAT_TONE = {
   good: "text-emerald-600 dark:text-emerald-400",
   warn: "text-amber-600 dark:text-amber-400",
   bad: "text-rose-600 dark:text-rose-400",
 };
 
+// One small stat box: icon, label, value and hint.
 function Stat({ icon: Icon, label, value, hint, tone }: { icon: LucideIcon; label: string; value: string; hint: string; tone?: keyof typeof STAT_TONE }) {
   return (
     <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm dark:border-slate-800 dark:bg-slate-900">
@@ -510,6 +529,7 @@ function Stat({ icon: Icon, label, value, hint, tone }: { icon: LucideIcon; labe
   );
 }
 
+// List of pump and mode events, 10 at first with "Show more".
 function ActivityLog({ events, fullTime }: { events: Overview["events"]; fullTime: (iso: string) => string }) {
   const [shown, setShown] = useState(10);
   const icons = { on: Droplets, off: PowerOff, mode: Sparkles, other: History };
@@ -569,7 +589,7 @@ function ActivityLog({ events, fullTime }: { events: Overview["events"]; fullTim
   );
 }
 
-
+// Grey icon + message shown when there's no data.
 function NoData({ text, icon: Icon = BarChart3 }: { text: string; icon?: LucideIcon }) {
   return (
     <div className="grid place-items-center px-5 py-10 text-center">
@@ -579,6 +599,7 @@ function NoData({ text, icon: Icon = BarChart3 }: { text: string; icon?: LucideI
   );
 }
 
+// NoData message inside a card.
 function EmptyPanel({ icon, text }: { icon: LucideIcon; text: string }) {
   return (
     <div className="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
@@ -587,6 +608,7 @@ function EmptyPanel({ icon, text }: { icon: LucideIcon; text: string }) {
   );
 }
 
+// Grey placeholder boxes shown while data loads.
 function Skeleton() {
   return (
     <div className="space-y-5" aria-hidden="true">

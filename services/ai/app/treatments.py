@@ -1,3 +1,6 @@
+# Treatment advice and symptoms for each plant disease the model can detect.
+
+# Advice used when a disease has no specific entry below
 DEFAULT_TREATMENT = {
     "immediate": [
         "Isolate the affected plant from nearby healthy plants.",
@@ -19,6 +22,7 @@ DEFAULT_TREATMENT = {
     ],
 }
 
+# Advice per disease: immediate steps, organic, chemical and prevention
 TREATMENTS = {
     "healthy": {
         "immediate": ["No disease treatment is needed based on this scan."],
@@ -75,6 +79,7 @@ TREATMENTS = {
     },
 }
 
+# Typical symptoms to show for each disease
 SYMPTOMS = {
     "healthy": [],
     "late_blight": ["Water-soaked lesions", "Brown leaf patches", "Rapid spread in humid conditions"],
@@ -84,28 +89,34 @@ SYMPTOMS = {
 }
 
 
+# Turns a label into lowercase_with_underscores
 def normalize_key(label: str) -> str:
     return label.lower().replace(" ", "_").replace("-", "_")
 
 
+# Gets the disease part of a label like "Tomato___Late_blight"
 def disease_key(label: str) -> str:
     parts = normalize_key(label).split("___")
     return parts[-1] if parts else normalize_key(label)
 
 
+# Gets the crop part of a label, e.g. "Tomato"
 def crop_name(label: str) -> str:
     return label.split("___")[0].replace("_", " ").title()
 
 
+# Returns the treatment advice for a label
 def treatment_for(label: str):
     key = disease_key(label)
     return TREATMENTS.get(key, DEFAULT_TREATMENT)
 
 
+# Returns the symptom list for a label
 def symptoms_for(label: str):
     return SYMPTOMS.get(disease_key(label), [])
 
 
+# Guesses severity (low/medium/high) from the disease and confidence
 def severity_for(label: str, confidence: float) -> str:
     key = disease_key(label)
     if key == "healthy":

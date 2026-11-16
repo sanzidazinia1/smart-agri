@@ -1,10 +1,10 @@
 "use client";
 
-// Garden flavour of SearchList: name + location, searchable by name, location
-// or type. Scales to 1,000+ gardens.
+// Searchable garden list (by name, location or type) built on SearchList
 import { MapPin } from "lucide-react";
 import { SearchList } from "@/components/SearchList";
 
+// The few garden fields the list needs
 export interface PickerGarden {
   id: string;
   name: string;
@@ -12,6 +12,7 @@ export interface PickerGarden {
   type?: string;
 }
 
+// Garden list that reports the chosen garden through onChoose
 export function GardenSearchList({
   gardens,
   onChoose,
@@ -26,6 +27,7 @@ export function GardenSearchList({
   allLabel?: string;
   heading?: string;
 }) {
+  // Quick lookup from garden id to garden object
   const byId = new Map(gardens.map((garden) => [garden.id, garden]));
   return (
     <SearchList

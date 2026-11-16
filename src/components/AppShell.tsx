@@ -1,12 +1,16 @@
 "use client";
 
+// Logged-in page layout: sidebar on the left, top bar and page content
 import { useEffect, useRef, useSyncExternalStore, type ReactNode } from "react";
 import { MOTION, Sidebar } from "@/components/Sidebar";
 import { Topbar } from "@/components/Topbar";
 
+// Browser storage key that remembers if the sidebar is collapsed
 const STORAGE_KEY = "smart-agri:sidebar-collapsed";
+// Functions to call when the collapsed setting changes
 const listeners = new Set<() => void>();
 
+// Listen for collapsed-setting changes (also from other browser tabs)
 function subscribe(listener: () => void) {
   listeners.add(listener);
   window.addEventListener("storage", listener);
@@ -16,6 +20,7 @@ function subscribe(listener: () => void) {
   };
 }
 
+// Read the saved collapsed setting from the browser
 function readCollapsed() {
   try {
     return window.localStorage.getItem(STORAGE_KEY) === "1";
@@ -24,6 +29,7 @@ function readCollapsed() {
   }
 }
 
+// Save the collapsed setting and tell all listeners
 function writeCollapsed(collapsed: boolean) {
   try {
     window.localStorage.setItem(STORAGE_KEY, collapsed ? "1" : "0");
@@ -43,11 +49,11 @@ export function AppShell({
   userName: string | null;
   children: ReactNode;
 }) {
+  // Current collapsed state, kept in sync with browser storage
   const collapsed = useSyncExternalStore(subscribe, readCollapsed, () => false);
   const shellRef = useRef<HTMLDivElement>(null);
 
-  // Enable transitions only after the saved state has been applied, so a
-  // collapsed sidebar doesn't visibly animate closed on every page load.
+  // Turn on animations only after load so the sidebar doesn't animate closed
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
       if (shellRef.current) shellRef.current.dataset.ready = "true";
@@ -57,6 +63,7 @@ export function AppShell({
 
   return (
     <div ref={shellRef} className="group/shell">
+      {/* Desktop sidebar (hidden on mobile) */}
       <div
         className={`hidden md:fixed md:inset-y-0 md:z-40 md:flex md:flex-col group-data-[ready]/shell:transition-[width] ${MOTION} ${
           collapsed ? "md:w-[72px]" : "md:w-64"
@@ -64,6 +71,7 @@ export function AppShell({
       >
         <Sidebar collapsed={collapsed} onToggleCollapsed={() => writeCollapsed(!collapsed)} />
       </div>
+      {/* Top bar and page content, pushed right by the sidebar width */}
       <div
         className={`group-data-[ready]/shell:transition-[padding] ${MOTION} ${
           collapsed ? "md:pl-[72px]" : "md:pl-64"

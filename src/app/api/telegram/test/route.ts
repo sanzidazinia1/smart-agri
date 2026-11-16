@@ -1,9 +1,12 @@
+// API /api/telegram/test: send a test message to the user's Telegram
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/api-auth";
 
 export const runtime = "nodejs";
 
+// POST: send a test message and explain what went wrong if it fails
 export async function POST() {
+  // Auth check: only logged-in users
   const gate = await requireUser();
   if (gate instanceof NextResponse) return gate;
 

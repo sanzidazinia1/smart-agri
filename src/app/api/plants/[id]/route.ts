@@ -1,4 +1,4 @@
-// TASK: Domain CRUD — Plant update (PATCH: growth stage/health) / delete by id.
+// API /api/plants/[id]: update or delete one plant
 import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
@@ -6,6 +6,7 @@ import { requireUser } from "@/lib/api-auth";
 import { prisma } from "@/lib/db";
 import { GROWTH_STAGES } from "@/lib/growth-stages";
 
+// Validation schema: plant fields that may be changed
 const schema = z.object({
   gardenId: z.string().min(1).optional(),
   potId: z.string().min(1).optional(),
@@ -20,10 +21,12 @@ const schema = z.object({
   notes: z.string().optional(),
 });
 
+// PATCH: update a plant (name, stage, health, or move it to another pot)
 export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  // Auth check: only logged-in users
   const gate = await requireUser();
   if (gate instanceof NextResponse) return gate;
   const { id } = await params;
@@ -40,6 +43,7 @@ export async function PATCH(
     return NextResponse.json({ error: "Plant not found" }, { status: 404 });
   }
 
+  // Target pot must be the user's, in the garden, and free (or this plant's)
   const gardenId = parsed.data.gardenId ?? plant.gardenId;
   const potId = parsed.data.potId ?? plant.potId;
   if (!potId) {
@@ -86,6 +90,7 @@ export async function PATCH(
   return NextResponse.json({ success: true });
 }
 
+// DELETE: remove one of the user's plants
 export async function DELETE(
   _req: Request,
   { params }: { params: Promise<{ id: string }> },

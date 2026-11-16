@@ -1,16 +1,15 @@
 "use client";
 
-// Settings → Disease AI: choose what diagnoses leaf photos — the local model
-// (free, offline, 14 farm crops) or a free online vision AI (Google Gemini or
-// Groq) that knows any plant. Keys are stored encrypted on the server and
-// never sent back to the browser.
+// Settings card to pick which AI checks leaf photos (local, Gemini or Groq)
 import { useState } from "react";
 import useSWR from "swr";
 import { Check, ExternalLink, Eye, EyeOff, KeyRound, Loader2, Microscope, PlugZap, Trash2 } from "lucide-react";
 import { apiPost, apiPut } from "@/lib/api-client";
 import { errorMessage, useFeedback } from "@/components/Feedback";
 
+// Which AI engine diagnoses leaf photos
 type Provider = "LOCAL" | "GEMINI" | "GROQ";
+// Disease AI settings as sent by the server (keys are masked)
 interface AiSettingsView {
   provider: Provider;
   /** The local model can run here (false on the live site without a hosted AI service). */
@@ -20,12 +19,14 @@ interface AiSettingsView {
   groq: { key: string | null; model: string };
 }
 
+// The three engine choices shown as cards
 const OPTIONS: { value: Provider; name: string; tag: string; points: string[] }[] = [
   { value: "LOCAL", name: "Local model", tag: "Free · offline", points: ["Runs on your own AI service", "14 farm crops only (tomato, potato…)", "Basic accuracy"] },
   { value: "GEMINI", name: "Google Gemini", tag: "Free API key", points: ["Any plant, incl. houseplants", "Good with real garden photos", "Explains what it sees"] },
   { value: "GROQ", name: "Groq", tag: "Free API key", points: ["Any plant, very fast", "Llama 4 vision model", "Generous free limit"] },
 ];
 
+// Where to get a key, key hint and model names for each online AI
 const ONLINE: Record<Exclude<Provider, "LOCAL">, { site: string; url: string; hint: string; models: string[] }> = {
   GEMINI: {
     site: "aistudio.google.com/apikey",
@@ -41,13 +42,16 @@ const ONLINE: Record<Exclude<Provider, "LOCAL">, { site: string; url: string; hi
   },
 };
 
+// Shared style for text inputs in this card
 const input =
   "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm placeholder:text-slate-400 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-slate-700 dark:bg-slate-950";
 
+// Disease AI card on the Settings page; loads the saved settings
 export function DiseaseAiCard() {
   const { data, mutate } = useSWR<AiSettingsView>("/api/settings/ai");
   return (
     <section id="disease-ai" className="scroll-mt-24 rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      {/* Card header with the current engine */}
       <header className="flex items-start gap-3 border-b border-slate-100 px-5 py-4 dark:border-slate-800">
         <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400">
           <Microscope size={17} />
@@ -65,6 +69,7 @@ export function DiseaseAiCard() {
           </span>
         ) : null}
       </header>
+      {/* Settings form, or a grey placeholder while loading */}
       <div className="p-5">
         {data ? (
           <Editor key={JSON.stringify(data)} saved={data} onSaved={(next) => mutate(next, { revalidate: false })} />
@@ -76,7 +81,9 @@ export function DiseaseAiCard() {
   );
 }
 
+// Form for picking the engine, entering a key and saving
 function Editor({ saved, onSaved }: { saved: AiSettingsView; onSaved: (next: AiSettingsView) => void }) {
+  // Form state: chosen engine, typed keys, models, fallback, busy and test result
   const { toast } = useFeedback();
   const localOff = saved.localAvailable === false;
   // Live site without the local model: start on an online AI.
@@ -88,6 +95,7 @@ function Editor({ saved, onSaved }: { saved: AiSettingsView; onSaved: (next: AiS
   const [busy, setBusy] = useState<"save" | "test" | "remove" | null>(null);
   const [tested, setTested] = useState<{ ok: boolean; text: string } | null>(null);
 
+  // Chosen online AI (if any), its saved key/model, and whether anything changed
   const online = provider === "LOCAL" ? null : provider;
   const savedKey = online ? (online === "GEMINI" ? saved.gemini.key : saved.groq.key) : null;
   const savedModel = online ? (online === "GEMINI" ? saved.gemini.model : saved.groq.model) : null;
@@ -97,6 +105,7 @@ function Editor({ saved, onSaved }: { saved: AiSettingsView; onSaved: (next: AiS
     Boolean(online && (keys[online] || models[online] !== savedModel));
   const needsKey = Boolean(online && !savedKey && !keys[online]);
 
+  // Save the chosen engine, key and model to the server
   async function save() {
     setBusy("save");
     try {
@@ -115,6 +124,7 @@ function Editor({ saved, onSaved }: { saved: AiSettingsView; onSaved: (next: AiS
     }
   }
 
+  // Check that the key and model work before saving
   async function test() {
     if (!online) return;
     setBusy("test");
@@ -133,6 +143,7 @@ function Editor({ saved, onSaved }: { saved: AiSettingsView; onSaved: (next: AiS
     }
   }
 
+  // Delete the saved key for the chosen online AI
   async function removeKey() {
     if (!online) return;
     setBusy("remove");
@@ -298,6 +309,7 @@ function Editor({ saved, onSaved }: { saved: AiSettingsView; onSaved: (next: AiS
         </p>
       )}
 
+      {/* Save button */}
       <div className="flex justify-end">
         <button
           type="button"

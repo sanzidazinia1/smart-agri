@@ -1,8 +1,6 @@
 "use client";
 
-// PAGE: Disease AI — pick a pot's plant, add a leaf photo, get a diagnosis
-// with first steps and home remedies. Every scan is saved; the history below
-// reopens any past report. Uploads are bound to Garden → Pot → Plant.
+// Disease AI page: pick a pot, upload a leaf photo, get a saved diagnosis.
 import { useState } from "react";
 import useSWR from "swr";
 import useSWRInfinite from "swr/infinite";
@@ -28,6 +26,7 @@ import { DiagnosisReport, type Diagnosis } from "@/components/DiagnosisReport";
 import { useFeedback } from "@/components/Feedback";
 import Link from "next/link";
 
+// One past scan shown in the history list.
 interface HistoryItem {
   id: string;
   predictedDisease: string;
@@ -40,20 +39,21 @@ interface HistoryItem {
   garden: { name: string };
   plant: { commonName: string };
 }
+// One page of history from the API (with a cursor for the next page).
 interface HistoryPage {
   items: HistoryItem[];
   nextCursor: string | null;
   total?: number;
 }
+// Whether the AI service is ready, in demo mode, offline or not set up.
 type AiStatus = { status: "ready" | "mock" | "offline" | "unavailable"; labels?: number; engine?: string; engineName?: string; model?: string };
 
-// Phone photos can be large; they're shrunk in the browser before upload
-// (the model only looks at 224×224, and Vercel caps request bodies at 4.5 MB).
+// Photo limits: big phone photos are shrunk before upload (server max 4.5 MB).
 const MAX_BYTES = 30 * 1024 * 1024;
 const ACCEPTED = ["image/jpeg", "image/png", "image/webp"];
 const MAX_SIDE = 1600;
 
-/** Downscale to MAX_SIDE and re-encode as JPEG. Falls back to the original. */
+// Shrinks a photo to 1600px and saves it as JPEG; returns the original on error.
 async function shrinkPhoto(file: File): Promise<File> {
   try {
     const bitmap = await createImageBitmap(file);
@@ -70,15 +70,19 @@ async function shrinkPhoto(file: File): Promise<File> {
   }
 }
 
+// The Disease AI page component.
 export default function DiseaseDetectionPage() {
   const { toast } = useFeedback();
+  // Check the AI service status every 15 seconds.
   const { data: ai, mutate: recheckAi } = useSWR<AiStatus>("/api/disease-detection/health", { refreshInterval: 15000 });
   // Every pot across all gardens; only pots with a plant can be scanned.
   const { data: pots } = useSWR<PickerPot[]>("/api/pots");
   const [chosenPotId, setChosenPotId] = useState("");
+  // Only pots with a plant; use the chosen one or the first.
   const plantedPots = [...(pots ?? [])].filter((p) => p.plant).sort((a, b) => a.number - b.number);
   const pot = plantedPots.find((p) => p.id === chosenPotId) ?? plantedPots[0];
 
+  // Photo, loading, error, result and history state.
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState("");
   const [dragging, setDragging] = useState(false);
@@ -89,6 +93,7 @@ export default function DiseaseDetectionPage() {
   const [openId, setOpenId] = useState<string | null>(null);
   const [historyScope, setHistoryScope] = useState<"all" | "pot">("all");
 
+  // Load scan history 9 at a time ("Show older scans" loads more).
   const history = useSWRInfinite<HistoryPage>((index, previous) => {
     if (previous && !previous.nextCursor) return null;
     const scope = historyScope === "pot" && pot ? `&potId=${pot.id}` : "";
@@ -98,6 +103,7 @@ export default function DiseaseDetectionPage() {
   const historyTotal = history.data?.[0]?.total ?? 0;
   const hasMore = Boolean(history.data?.[history.data.length - 1]?.nextCursor);
 
+  // Checks the chosen photo's type and size, then shows a preview.
   function pick(next: File | undefined) {
     if (!next) return;
     if (!ACCEPTED.includes(next.type)) {
@@ -114,12 +120,14 @@ export default function DiseaseDetectionPage() {
     setError("");
   }
 
+  // Removes the chosen photo and its preview.
   function clearPhoto() {
     if (preview) URL.revokeObjectURL(preview);
     setFile(null);
     setPreview("");
   }
 
+  // Uploads the photo to the server and shows the diagnosis report.
   async function analyze() {
     if (!file || !pot?.plant) return;
     setLoading(true);
@@ -146,6 +154,7 @@ export default function DiseaseDetectionPage() {
     }
   }
 
+  // Can the Diagnose button be pressed?
   const ready = Boolean(file && pot?.plant && ai?.status !== "offline" && ai?.status !== "unavailable");
 
   return (
@@ -156,11 +165,12 @@ export default function DiseaseDetectionPage() {
         action={<AiStatusChip ai={ai} />}
       />
 
+      {/* Warning banners when the AI isn't available */}
       {ai?.status === "offline" ? <StartAiBanner onRetry={() => recheckAi()} /> : null}
       {ai?.status === "unavailable" ? <ChooseAiBanner /> : null}
 
       <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,24rem)_minmax(0,1fr)]">
-        {/* New scan */}
+        {/* New scan: choose pot, add photo, diagnose */}
         <section className="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
           <header className="flex items-center gap-2 border-b border-slate-100 px-5 py-4 dark:border-slate-800">
             <ScanSearch size={18} className="text-emerald-600 dark:text-emerald-400" />
@@ -257,7 +267,7 @@ export default function DiseaseDetectionPage() {
           </div>
         </section>
 
-        {/* Result */}
+        {/* Result: loading, the report, or how-it-works help */}
         <section className="min-w-0 rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
           {loading ? (
             <AnalyzingState />
@@ -269,7 +279,7 @@ export default function DiseaseDetectionPage() {
         </section>
       </div>
 
-      {/* History */}
+      {/* Scan history list */}
       <section className="mt-6 rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-4 dark:border-slate-800">
           <div>
@@ -367,6 +377,7 @@ export default function DiseaseDetectionPage() {
         </div>
       </section>
 
+      {/* Side panel that reopens a saved report */}
       <SlideOver open={openId !== null} onClose={() => setOpenId(null)} title="Diagnosis report" description="Saved scan — the full report as it was diagnosed.">
         {openId ? <LoadedReport id={openId} demo={demoIds.includes(openId)} inPanel /> : null}
       </SlideOver>
@@ -374,6 +385,7 @@ export default function DiseaseDetectionPage() {
   );
 }
 
+// A numbered step heading with its content.
 function Step({ n, title, children }: { n: number; title: string; children: React.ReactNode }) {
   return (
     <div>
@@ -386,6 +398,7 @@ function Step({ n, title, children }: { n: number; title: string; children: Reac
   );
 }
 
+// Loads a saved report by id and shows it.
 function LoadedReport({ id, demo, inPanel = false }: { id: string; demo: boolean; inPanel?: boolean }) {
   const { data, error } = useSWR<Diagnosis>(`/api/disease-detection/reports/${id}`);
   if (error) return <p className="p-6 text-sm text-rose-600">Couldn&apos;t load this report.</p>;
@@ -393,6 +406,7 @@ function LoadedReport({ id, demo, inPanel = false }: { id: string; demo: boolean
   return <DiagnosisReport report={data} demo={demo} inPanel={inPanel} />;
 }
 
+// Spinner shown while the leaf is being checked.
 function AnalyzingState({ label = "Looking closely at the leaf…" }: { label?: string }) {
   return (
     <div className="grid min-h-[26rem] place-items-center p-6 text-center">
@@ -408,6 +422,7 @@ function AnalyzingState({ label = "Looking closely at the leaf…" }: { label?: 
   );
 }
 
+// Placeholder showing the 3 steps before the first scan.
 function HowItWorks() {
   const steps = [
     { icon: Sprout, title: "Choose the pot", text: "Pick the pot the sick leaf came from." },
@@ -435,6 +450,7 @@ function HowItWorks() {
   );
 }
 
+// Small coloured pill showing the AI service status.
 function AiStatusChip({ ai }: { ai: AiStatus | undefined }) {
   if (!ai) return null;
   const [label, tone, dot] =
@@ -465,7 +481,7 @@ function AiStatusChip({ ai }: { ai: AiStatus | undefined }) {
   );
 }
 
-/** Live site without a hosted AI service: Gemini or Groq does the diagnosis. */
+// Banner asking the user to add a Gemini or Groq key in Settings.
 function ChooseAiBanner() {
   return (
     <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50/70 p-4 dark:border-amber-500/30 dark:bg-amber-500/10">
@@ -486,6 +502,7 @@ function ChooseAiBanner() {
   );
 }
 
+// Banner telling the user to start the local AI service.
 function StartAiBanner({ onRetry }: { onRetry: () => void }) {
   return (
     <div className="mb-5 rounded-2xl border border-rose-200 bg-rose-50/70 p-4 dark:border-rose-500/30 dark:bg-rose-500/10">

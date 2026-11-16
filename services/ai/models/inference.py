@@ -1,3 +1,4 @@
+# Command-line tool to test the disease model on one photo or on test folders.
 import os
 import sys
 import numpy as np
@@ -9,14 +10,13 @@ from tensorflow.keras.preprocessing import image as kimage
 from tensorflow.keras.applications.efficientnet import preprocess_input
 from sklearn.metrics import classification_report, confusion_matrix
 
-# Load the trained model
+# The trained model file
 MODEL_PATH = "plant_disease_efficientnet.keras"
 
 # Class names mapping (Plant Village dataset)
 CLASS_NAMES_FILE = "class_names.txt"
 
-# Mapping from test folder names to class indices
-# This handles variations in spelling found in the test directories
+# Test folder name -> class number (includes common misspellings)
 FOLDER_TO_IDX = {
     "Apple - Scab": 0,
     "Apple - Black Rot": 1,
@@ -61,8 +61,8 @@ FOLDER_TO_IDX = {
 }
 
 
+# Reads class_names.txt into {number: name}
 def load_class_names():
-    """Load class names from file."""
     if os.path.exists(CLASS_NAMES_FILE):
         class_names = {}
         with open(CLASS_NAMES_FILE, "r") as f:
@@ -75,8 +75,8 @@ def load_class_names():
     return {}
 
 
+# Loads the trained model, or exits if the file is missing
 def load_model():
-    """Load the trained plant disease detection model."""
     from tensorflow.keras.models import load_model
 
     if not os.path.exists(MODEL_PATH):
@@ -88,10 +88,8 @@ def load_model():
     return model
 
 
+# Predicts the top 5 diseases for one image
 def predict_image(model, img_path, target_size=(224, 224), top_k=5):
-    """
-    Predict disease for a single image.
-    """
     try:
         # Load and preprocess the image
         img = kimage.load_img(img_path, target_size=target_size)
@@ -132,11 +130,8 @@ def predict_image(model, img_path, target_size=(224, 224), top_k=5):
         return None
 
 
+# Tests the model on all test folders and saves CSV, chart and Markdown reports
 def run_evaluation(model):
-    """
-    Evaluate the model using images from the specified test directories.
-    Saves results to CSV and Markdown files.
-    """
     test_dirs = [
         "Test Leaves - Mun Suen/",
         "Test Leaves - Zoey/",
@@ -313,8 +308,8 @@ def run_evaluation(model):
     print("\n" + "=" * 60)
 
 
+# Menu loop: predict one image, run the full evaluation, or exit
 def main():
-    """Main function to run the plant disease detection inference."""
     print("=" * 60)
     print("🌿 PLANT DISEASE DETECTION - INFERENCE & EVALUATION")
     print("=" * 60)

@@ -1,6 +1,4 @@
-// TASK: Proposal Feature 2 support — Sensor/Device registration.
-// WHAT: Registers an ESP32/sensor and returns a one-time plaintext device key
-//       (only its hash is stored) used to authenticate /api/iot/ingest posts.
+// API /api/devices: list your ESP32 boards and register new ones
 import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
@@ -10,7 +8,9 @@ import { otherDeviceOnPot } from "@/lib/device-claim";
 import { generateDeviceKey } from "@/lib/device-key";
 import { getDeviceConnectionStatus } from "@/lib/device-status";
 
+// GET: list the user's devices with their pots and online/offline status
 export async function GET(req: Request) {
+  // Auth check: only logged-in users
   const gate = await requireUser();
   if (gate instanceof NextResponse) return gate;
   const { searchParams } = new URL(req.url);
@@ -37,6 +37,7 @@ export async function GET(req: Request) {
   })));
 }
 
+// Validation schema: data needed to register a new device
 const schema = z.object({
   gardenId: z.string().min(1),
   hardwareId: z.string().trim().min(1),
@@ -58,6 +59,7 @@ const schema = z.object({
   potId: z.string().trim().min(1).optional(),
 });
 
+// POST: register a device and return its secret key once (only the hash is saved)
 export async function POST(req: Request) {
   const gate = await requireUser();
   if (gate instanceof NextResponse) return gate;
@@ -68,6 +70,7 @@ export async function POST(req: Request) {
     if (!parsed.success) {
       return NextResponse.json({ error: "Invalid device data" }, { status: 400 });
     }
+    // Make sure the garden belongs to this user
     const garden = await prisma.garden.findFirst({
       where: { id: parsed.data.gardenId, userId },
     });
@@ -84,12 +87,14 @@ export async function POST(req: Request) {
       if (!pot) {
         return NextResponse.json({ error: "Pot not found in this garden" }, { status: 400 });
       }
+      // A pot can only have one device
       const occupant = await otherDeviceOnPot(potId);
       if (occupant) {
         return NextResponse.json({ error: `This pot already has a device (${occupant}). Disconnect it first.` }, { status: 409 });
       }
     }
     const { plain, hash } = generateDeviceKey();
+    // DB write: create the device and link it to the pot together
     const device = await prisma.$transaction(async (tx) => {
       const created = await tx.device.create({
         data: { ...deviceData, userId, apiKeyHash: hash },
@@ -102,6 +107,7 @@ export async function POST(req: Request) {
     // Plaintext key is returned exactly once — store it on the ESP32.
     return NextResponse.json({ device, deviceKey: plain }, { status: 201 });
   } catch (error) {
+    // P2002 = unique clash: this hardware ID is already registered
     if (
       error instanceof Prisma.PrismaClientKnownRequestError &&
       error.code === "P2002"

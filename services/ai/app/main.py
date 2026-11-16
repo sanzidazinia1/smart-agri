@@ -1,3 +1,4 @@
+# FastAPI web service: takes a leaf photo and returns the likely plant disease.
 import io
 import json
 import os
@@ -8,17 +9,18 @@ from PIL import Image, ImageOps
 
 from .treatments import crop_name, severity_for, symptoms_for, treatment_for
 
+# Where the model files live
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
 MODELS_DIR = Path(os.getenv("MODELS_DIR", SERVICE_ROOT / "models"))
 
 
+# Picks which model file to load (MODEL_PATH env, or the first one found)
 def _resolve_model_path() -> Path:
     explicit = os.getenv("MODEL_PATH")
     if explicit:
         return Path(explicit)
 
-    # Prefer the downloaded PlantVillage EfficientNet artifact, then fall back
-    # to the previous local demo model names.
+    # Prefer the EfficientNet model, then older demo model names
     for candidate in (
         MODELS_DIR / "plant_disease_efficientnet.keras",
         MODELS_DIR / "plant_disease_model.keras",
@@ -29,6 +31,7 @@ def _resolve_model_path() -> Path:
     return MODELS_DIR / "plant_disease_efficientnet.keras"
 
 
+# Reads class_names.txt lines like "0: Apple___healthy" into a list
 def _parse_class_names(path: Path) -> list[str]:
     class_names: dict[int, str] = {}
     for line in path.read_text(encoding="utf-8").splitlines():
@@ -39,6 +42,7 @@ def _parse_class_names(path: Path) -> list[str]:
     return [class_names[i] for i in sorted(class_names)]
 
 
+# Loads the class labels; skips files whose count doesn't match the model
 def _load_labels(expected_count: int | None = None) -> list[str]:
     explicit = os.getenv("LABELS_PATH")
     paths = [
@@ -74,6 +78,7 @@ def _load_labels(expected_count: int | None = None) -> list[str]:
     return []
 
 
+# Model settings (can be changed with environment variables)
 MODEL_PATH = _resolve_model_path()
 IMAGE_SIZE = int(os.getenv("IMAGE_SIZE", "224"))
 USE_EFFICIENTNET_PREPROCESS = os.getenv(
@@ -81,11 +86,13 @@ USE_EFFICIENTNET_PREPROCESS = os.getenv(
     "1" if "efficientnet" in MODEL_PATH.name.lower() else "0",
 ) == "1"
 
+# The web app, plus the loaded model and labels (None/empty = use mock answers)
 app = FastAPI(title="SmartAgri Plant Disease Detection", version="1.0.0")
 model = None
 labels: list[str] = []
 
 
+# Loads the model and labels once when the service starts
 @app.on_event("startup")
 def load_artifacts():
     global model, labels
@@ -93,15 +100,11 @@ def load_artifacts():
         print(f"Model not found at {MODEL_PATH}; using mock fallback.")
         return
 
-    # TensorFlow is optional: if it isn't installed (e.g. Python 3.13) or the
-    # model fails to load, fall back to the mock predictor so the API still
-    # serves the full disease-detection pipeline for demos.
+    # If TensorFlow or the model fails to load, fall back to mock answers
     try:
         import tensorflow as tf
 
-        # compile=False: we only need inference, and it avoids deserializing the
-        # optimizer/loss config — a common failure when loading a legacy Keras-2
-        # .h5 under the Keras 3 bundled with TensorFlow 2.19+.
+        # compile=False: only predicting, and it avoids old .h5 loading errors
         loaded_model = tf.keras.models.load_model(MODEL_PATH, compile=False)
 
         # Auto-match preprocessing to the model's expected input size.
@@ -133,19 +136,16 @@ def load_artifacts():
         print(f"Could not load TensorFlow model ({exc}). Using mock fallback.")
 
 
+# Logs a warning when the real model isn't loaded
 def ensure_ready():
     if model is None or not labels:
         print("Warning: Model artifacts not found. Using fail-safe mock fallback for predictions.")
 
 
-# ---------------------------------------------------------------------------
-# Preprocessing + test-time augmentation
-# ---------------------------------------------------------------------------
-# PlantVillage photos are square, one leaf centred. Real phone photos are
-# rotated (EXIF), oblong and framed loosely, so instead of squashing one image
-# we look at several views of it and average what the model says.
+# ---- Preprocessing: several views of each photo, results averaged ----
 
 
+# Makes 6 views of the photo (padded, centre, zoomed, and their mirrors)
 def _views(image_bytes: bytes) -> list:
     image = Image.open(io.BytesIO(image_bytes))
     image = ImageOps.exif_transpose(image).convert("RGB")  # phone photos: apply rotation
@@ -163,6 +163,7 @@ def _views(image_bytes: bytes) -> list:
     return base + [ImageOps.mirror(view) for view in base]
 
 
+# Turns the photo views into a number array the model can read
 def preprocess_image(image_bytes: bytes):
     import numpy as np
     import tensorflow as tf
@@ -176,28 +177,29 @@ def preprocess_image(image_bytes: bytes):
     return batch
 
 
+# Short crop name from a label, e.g. 'Corn_(maize)___Common_rust_' -> 'corn'
 def crop_key(label: str) -> str:
-    """'Corn_(maize)___Common_rust_' -> 'corn', 'Pepper,_bell___healthy' -> 'pepper'."""
     head = label.split("___")[0].lower()
     for sep in ("_(", ",", "("):
         head = head.split(sep)[0]
     return head.strip("_ ")
 
 
+# Readable disease name, e.g. "Late Blight" or "Healthy tomato"
 def pretty(label: str) -> str:
     name = label.split("___")[-1].replace("_", " ").strip()
     crop = crop_name(label).split(" (")[0].split(",")[0]
     return f"Healthy {crop.lower()}" if name.lower() == "healthy" else name.title()
 
 
-# Below this the answer is a guess: say so and suggest a better photo.
+# Below these limits the answer is marked "unsure"
 UNSURE_BELOW = float(os.getenv("UNSURE_BELOW", "0.55"))
 UNSURE_MARGIN = float(os.getenv("UNSURE_MARGIN", "0.15"))
-# With a known crop: if less than this share of the model's belief was on that
-# crop, the photo doesn't look like it — flag the answer as unsure.
+# Unsure if the photo barely looks like the pot's known crop
 CROP_MATCH_MIN = float(os.getenv("CROP_MATCH_MIN", "0.35"))
 
 
+# Health check: says whether the real model is loaded
 @app.get("/health")
 def health():
     return {
@@ -209,19 +211,19 @@ def health():
     }
 
 
-# Optional shared secret: when AI_SERVICE_TOKEN is set (public hosting),
-# /predict requires a matching "x-ai-token" header. /health stays open.
+# Optional secret: if set, /predict needs a matching "x-ai-token" header
 AI_SERVICE_TOKEN = os.getenv("AI_SERVICE_TOKEN", "")
 
 
+# Main endpoint: upload a leaf photo, get the disease, confidence and treatment
 @app.post("/predict")
 async def predict(
     file: UploadFile = File(...),
-    # The pot's crop when the app knows it (e.g. "tomato"): only that crop's
-    # diseases are considered, so a tomato is never called a peach.
+    # Optional crop (e.g. "tomato"): only that crop's diseases are considered
     crop: str | None = Form(default=None),
     x_ai_token: str | None = Header(default=None),
 ):
+    # Safety checks: token, file type and empty upload
     if AI_SERVICE_TOKEN and x_ai_token != AI_SERVICE_TOKEN:
         raise HTTPException(status_code=401, detail="Missing or invalid AI service token.")
     ensure_ready()
@@ -234,7 +236,7 @@ async def predict(
 
     global model, labels
     if model is None or not labels:
-        # Realistic Tomato Late Blight mock fallback for demo/viva when model isn't trained
+        # No model: return a fixed Tomato Late Blight demo answer
         label = "Tomato___Late_blight"
         confidence = 0.942
         treatment = treatment_for(label)
@@ -263,15 +265,13 @@ async def predict(
     probs = probs / probs.sum()
     looked_like = crop_key(labels[int(np.argmax(probs))])
 
-    # Only this crop's classes, when the crop is one the model knows.
+    # Keep only this crop's classes, when the crop is one the model knows
     wanted = (crop or "").strip().lower()
     allowed = [i for i, name in enumerate(labels) if crop_key(name) == wanted] if wanted else []
-    # A crop with a single class (orange: only citrus greening; blueberry: only
-    # healthy…) can't be limited to — it would always give that one answer.
+    # Don't limit to a crop with only one class (it would always win)
     if len(allowed) < 2:
         allowed = []
-    # How much of the model's belief was on this crop at all: low = the photo
-    # doesn't look like this plant (wrong plant, background, blurry).
+    # Share of belief on this crop (low = photo doesn't look like this plant)
     crop_match = float(probs[allowed].sum()) if allowed else None
     if allowed:
         mask = np.zeros_like(probs)
@@ -279,6 +279,7 @@ async def predict(
         probs = probs * mask
         probs = probs / probs.sum() if probs.sum() > 0 else mask / mask.sum()
 
+    # Rank classes: best guess first, runner-up second
     order = [int(i) for i in np.argsort(probs)[::-1] if probs[i] > 0]
     class_index = order[0]
     confidence = float(probs[class_index])

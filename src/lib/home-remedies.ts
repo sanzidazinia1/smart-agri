@@ -1,35 +1,36 @@
-// Home remedies for the leaf diseases the AI model recognises: simple sprays
-// and care steps made from things most homes in Bangladesh already have
-// (neem leaves, garlic, green chilli, baking soda, milk, wood ash, cinnamon).
-// Keyed by the model's class name ("Tomato___Late_blight" → "late_blight").
+// Home remedies for each leaf disease, using things most Bangladeshi homes have
 
+// One home remedy (e.g. neem spray) with ingredients and steps
 export interface HomeRemedy {
   id: string;
   name: string;
-  /** Local name, shown as a hint. */
+  // Local (Bangla) name, shown as a hint
   localName?: string;
-  /** What it does, in one line. */
+  // What it does, in one line
   why: string;
   ingredients: string[];
   steps: string[];
-  /** How often / when to use it. */
+  // How often / when to use it
   schedule: string;
   caution?: string;
 }
 
+// The broad type of problem
 export type DiseaseKind = "healthy" | "fungal" | "bacterial" | "viral" | "pest" | "care";
 
+// The full care plan shown for one disease
 export interface RemedyPlan {
   kind: DiseaseKind;
-  /** One sentence: what this is and how worried to be. */
+  // One sentence: what this is and how worried to be
   summary: string;
-  /** Do these first, today. */
+  // Do these first, today
   firstSteps: string[];
   remedies: HomeRemedy[];
-  /** When to stop home care and get help / remove the plant. */
+  // When to stop home care and get help or remove the plant
   escalate?: string;
 }
 
+// All home remedies, by id
 const REMEDIES: Record<string, HomeRemedy> = {
   removeLeaves: {
     id: "removeLeaves",
@@ -171,14 +172,17 @@ const REMEDIES: Record<string, HomeRemedy> = {
   },
 };
 
+// Short helper: turns remedy ids into remedy objects
 const r = (...ids: (keyof typeof REMEDIES)[]) => ids.map((id) => REMEDIES[id]);
 
+// First steps shared by all fungal diseases
 const FUNGAL_STEPS = [
   "Move the pot away from your other plants.",
   "Cut off and bin the spotted leaves.",
   "Water only the soil, in the morning — keep leaves dry.",
 ];
 
+// Care plan for each disease the AI can name
 const PLANS: Record<string, RemedyPlan> = {
   healthy: {
     kind: "healthy",
@@ -259,8 +263,7 @@ const PLANS: Record<string, RemedyPlan> = {
   },
 };
 
-// Broader groups an online AI (Gemini / Groq) can answer with, for plants and
-// problems the plans above don't name.
+// Broader groups the online AI (Gemini / Groq) can answer with
 PLANS.other_viral = {
   kind: "viral",
   summary: "Looks like a plant virus. There's no cure — keep it away from your other plants.",
@@ -285,7 +288,7 @@ PLANS.care_problem = {
   remedies: r("compostTea", "airflow"),
 };
 
-// Diseases that behave like one of the plans above.
+// Diseases that can use one of the plans above
 const ALIASES: Record<string, string> = {
   apple_scab: "early_blight",
   black_rot: "early_blight",
@@ -299,6 +302,7 @@ const ALIASES: Record<string, string> = {
   other_bacterial: "bacterial_spot",
 };
 
+// Fallback plan when the disease is unknown
 const GENERIC: RemedyPlan = {
   kind: "fungal",
   summary: "Treat it like a leaf fungus: dry leaves, remove the worst ones, and spray weekly.",
@@ -306,7 +310,7 @@ const GENERIC: RemedyPlan = {
   remedies: r("removeLeaves", "neemSpray", "bakingSoda", "airflow"),
 };
 
-/** "Tomato___Spider_mites Two-spotted_spider_mite" → "spider_mites_two_spotted_spider_mite" */
+// Turns an AI class name like "Tomato___Late_blight" into a key like "late_blight"
 export function diseaseKey(classNameOrDisease: string) {
   const part = classNameOrDisease.split("___").pop() ?? classNameOrDisease;
   return part
@@ -315,6 +319,7 @@ export function diseaseKey(classNameOrDisease: string) {
     .replace(/[\s-]+/g, "_");
 }
 
+// Returns the care plan for a disease (or a general one if unknown)
 export function remedyPlanFor(classNameOrDisease: string): RemedyPlan {
   const key = diseaseKey(classNameOrDisease);
   if (key.includes("healthy")) return PLANS.healthy;

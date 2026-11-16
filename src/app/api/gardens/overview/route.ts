@@ -1,12 +1,16 @@
+// API /api/gardens/overview: garden cards with device, pump and alert summary
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/api-auth";
 import { prisma } from "@/lib/db";
 import { getDeviceConnectionStatus } from "@/lib/device-status";
 import { getAlertsByGarden } from "@/lib/garden-alerts-server";
 
+// GET: every garden with online/offline device counts, pumps on and alerts
 export async function GET() {
+  // Auth check: only logged-in users
   const gate = await requireUser();
   if (gate instanceof NextResponse) return gate;
+  // Load gardens and their open alerts at the same time
   const [gardens, alertsByGarden] = await Promise.all([prisma.garden.findMany({
     where: { userId: gate }, orderBy: { updatedAt: "desc" },
     include: {

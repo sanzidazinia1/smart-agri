@@ -1,18 +1,19 @@
 "use client";
 
-// Leaflet map for choosing (or showing) a garden's coordinates. Leaflet needs
-// `window`, so always load this through next/dynamic with `ssr: false`.
+// Map for picking or showing a garden's location (load with ssr: false)
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 import { Loader2, LocateFixed } from "lucide-react";
 import { useEffect, useState } from "react";
 import { MapContainer, Marker, TileLayer, useMap, useMapEvents } from "react-leaflet";
 
-// Dhaka — a sensible starting view before any point is chosen.
+// Dhaka: the starting view before any point is chosen
 const DEFAULT_CENTER: [number, number] = [23.8103, 90.4125];
+// Zoom levels for the default view and after picking a point
 const DEFAULT_ZOOM = 11;
 const PICKED_ZOOM = 15;
 
+// The two map styles the user can switch between
 const LAYERS = {
   map: {
     label: "Map",
@@ -30,8 +31,7 @@ const LAYERS = {
   },
 } as const;
 
-// An inline SVG pin avoids Leaflet's default marker images, which bundlers
-// don't resolve.
+// Custom SVG pin, because Leaflet's default marker images don't bundle well
 const pinIcon = L.divIcon({
   className: "",
   html: `<svg width="34" height="44" viewBox="0 0 34 44" xmlns="http://www.w3.org/2000/svg" style="filter:drop-shadow(0 3px 4px rgba(0,0,0,.35))">
@@ -42,6 +42,7 @@ const pinIcon = L.divIcon({
   iconAnchor: [17, 43],
 });
 
+// Props: current point, pick/locate callbacks and loading state
 export interface LocationPickerProps {
   lat: number | null;
   lng: number | null;
@@ -53,6 +54,7 @@ export interface LocationPickerProps {
   className?: string;
 }
 
+// The map with a pin, layer switch, GPS button and click-to-pick
 export default function LocationPicker({
   lat,
   lng,
@@ -61,6 +63,7 @@ export default function LocationPicker({
   locating = false,
   className = "h-56",
 }: LocationPickerProps) {
+  // Current map style and the selected point (if any)
   const [layer, setLayer] = useState<keyof typeof LAYERS>("map");
   const hasPoint = lat != null && lng != null;
   const position: [number, number] | null = hasPoint ? [lat, lng] : null;
@@ -85,6 +88,7 @@ export default function LocationPicker({
           maxZoom={tiles.maxZoom}
           className={tiles.className}
         />
+        {/* Pin; can be dragged to move the point when editable */}
         {position ? (
           <Marker
             position={position}
@@ -106,6 +110,7 @@ export default function LocationPicker({
         <FollowPosition position={position} />
       </MapContainer>
 
+      {/* Map / Satellite switch */}
       <div className="absolute right-2 top-2 z-[1000] flex overflow-hidden rounded-lg border border-slate-200 bg-white text-xs font-semibold shadow-md dark:border-slate-700 dark:bg-slate-900">
         {(Object.keys(LAYERS) as (keyof typeof LAYERS)[]).map((key) => (
           <button
@@ -138,6 +143,7 @@ export default function LocationPicker({
         </button>
       ) : null}
 
+      {/* Hint shown before any point is picked */}
       {!readOnly && !hasPoint ? (
         <p className="pointer-events-none absolute inset-x-0 bottom-6 z-[1000] mx-auto w-fit rounded-full bg-slate-900/80 px-3 py-1 text-xs font-medium text-white">
           Click the map to drop a pin
@@ -147,6 +153,7 @@ export default function LocationPicker({
   );
 }
 
+// Drop the pin where the user clicks on the map
 function ClickToPick({ onPick }: { onPick: (lat: number, lng: number) => void }) {
   useMapEvents({
     click: (event) => onPick(round(event.latlng.lat), round(event.latlng.lng)),
@@ -169,6 +176,7 @@ function FollowPosition({ position }: { position: [number, number] | null }) {
   return null;
 }
 
+// Round coordinates to 6 decimal places
 function round(value: number) {
   return Number(value.toFixed(6));
 }

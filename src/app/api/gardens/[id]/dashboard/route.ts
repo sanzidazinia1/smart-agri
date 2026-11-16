@@ -1,3 +1,4 @@
+// API /api/gardens/[id]/dashboard: everything the garden details page shows
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/api-auth";
 import { prisma } from "@/lib/db";
@@ -6,7 +7,9 @@ import { getGardenWeather, type WeatherResult } from "@/lib/weather";
 import { persistGardenWeatherSnapshot } from "@/lib/weather-history";
 import { getDeviceConnectionStatus } from "@/lib/device-status";
 
+// How many recent moisture points to show per pot in its mini chart
 const HISTORY_POINTS_PER_POT = 30;
+// Reasons that count as an automatic watering decision
 const AUTO_DECISION_REASONS = [
   "SOIL_DRY",
   "RAIN_EXPECTED",
@@ -14,10 +17,13 @@ const AUTO_DECISION_REASONS = [
   "SOIL_MOISTURE_NORMAL",
 ];
 
+// GET: garden, pots, devices, weather, history and alerts in one response
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+  // Auth check: only logged-in users
   const gate = await requireUser();
   if (gate instanceof NextResponse) return gate;
   const { id } = await params;
+  // Ownership check: load the garden only if it belongs to this user
   const garden = await prisma.garden.findFirst({
     where: { id, userId: gate },
     include: {
@@ -33,6 +39,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   });
   if (!garden) return NextResponse.json({ error: "Garden not found" }, { status: 404 });
 
+  // Load readings, pump history, decisions, scans and failed commands in parallel
   const [readings, pumpHistory, decisionHistory, predictions, failedCommands] = await Promise.all([
     prisma.reading.findMany({ where: { userId: gate, gardenId: id, metric: "soil_moisture", potId: { not: null } }, orderBy: { recordedAt: "desc" }, take: 500, select: { potId: true, value: true, recordedAt: true } }),
     prisma.irrigationEvent.findMany({ where: { userId: gate, gardenId: id }, orderBy: { startedAt: "desc" }, take: 30, select: { id: true, potId: true, mode: true, status: true, reason: true, startedAt: true } }),
@@ -40,6 +47,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     prisma.diseasePrediction.findMany({ where: { userId: gate, gardenId: id }, orderBy: { createdAt: "desc" }, take: 50, select: { id: true, potId: true, plantId: true, predictedDisease: true, className: true, confidence: true, createdAt: true } }),
     prisma.deviceCommand.findMany({ where: { userId: gate, gardenId: id, status: "FAILED" }, orderBy: { createdAt: "desc" }, take: 20, select: { id: true, potId: true, error: true, createdAt: true } }),
   ]);
+  // Group moisture readings by pot, oldest first for the chart
   const moistureByPot = new Map<string, { value: number; recordedAt: Date }[]>();
   for (const reading of readings) {
     if (!reading.potId) continue;
@@ -54,6 +62,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     if (!latestPredictionByPot.has(prediction.potId)) latestPredictionByPot.set(prediction.potId, prediction);
   }
   const latestPredictions = [...latestPredictionByPot.values()];
+  // Weather needs the garden's location; save a snapshot for history
   let weather: WeatherResult | null = null;
   let weatherUnavailable = false;
   if (garden.lat != null && garden.lng != null) {
@@ -72,10 +81,11 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     // Which pot each port waters.
     ports: potMappings.map((m) => ({ port: m.port, potId: m.pot.id, potLabel: m.pot.label })),
   }));
+  // Work out alerts, then hide the ones the user already resolved
   const activeAlerts = buildGardenAlerts({ gardenId: garden.id, pots: pots.map((pot) => ({ id: pot.id, label: pot.label, plant: pot.plant, moisture: pot.currentMoisture, moistureOnThreshold: pot.moistureOnThreshold })), devices, weather, latestPredictions, failedCommands });
   const resolutions = await prisma.alertResolution.findMany({ where: { userId: gate, gardenId: id }, select: { alertKey: true, resolvedAt: true } });
   const { alerts, resolved: resolvedAlertList, resolvedCount, stale } = applyAlertResolutions(activeAlerts, resolutions);
-  // The condition behind these has cleared; forget the resolution so a recurrence alerts again.
+  // Problem is gone: forget its resolve so it alerts again if it comes back
   if (stale.length) await prisma.alertResolution.deleteMany({ where: { gardenId: id, alertKey: { in: stale } } });
   return NextResponse.json({
     garden: { id: garden.id, name: garden.name, location: garden.location, lat: garden.lat, lng: garden.lng, type: garden.type },

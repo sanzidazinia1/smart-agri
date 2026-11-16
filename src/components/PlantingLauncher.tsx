@@ -1,7 +1,6 @@
 "use client";
 
-// "Add pot & plant" button for pages that list several gardens: adds to the
-// filtered garden directly, or asks which garden first.
+// "Add pot & plant" button: uses the current garden or asks which garden first
 import { useCallback, useRef, useState } from "react";
 import useSWR from "swr";
 import { ChevronDown, Plus } from "lucide-react";
@@ -10,6 +9,7 @@ import { useDismiss } from "@/components/HeaderMenus";
 import { useFeedback } from "@/components/Feedback";
 import { GardenSearchList, type PickerGarden } from "@/components/GardenSearchList";
 
+// Launcher button plus the add-plant panel
 export function PlantingLauncher({
   gardens,
   gardenId,
@@ -20,6 +20,7 @@ export function PlantingLauncher({
   gardenId: string;
   onCreated: () => void;
 }) {
+  // Toast messages, chosen garden, and garden-list open state
   const { toast } = useFeedback();
   const [target, setTarget] = useState<PickerGarden | null>(null);
   const [picking, setPicking] = useState(false);
@@ -28,10 +29,13 @@ export function PlantingLauncher({
   const close = useCallback(() => setPicking(false), []);
   useDismiss(picking, close, rootRef, triggerRef);
 
+  // Load existing pot labels for the chosen garden
   const { data: pots } = useSWR<{ label: string }[]>(target ? `/api/pots?gardenId=${target.id}` : null);
 
+  // Garden to use without asking (the viewed one, or the only one)
   const fixed = gardenId !== "all" ? gardens.find((garden) => garden.id === gardenId) : gardens.length === 1 ? gardens[0] : undefined;
 
+  // Button click: open the panel directly or show the garden list
   function start() {
     if (!gardens.length) {
       toast.info("Create a garden first, then add pots to it.");
@@ -43,6 +47,7 @@ export function PlantingLauncher({
 
   return (
     <div ref={rootRef} className="relative">
+      {/* Main "Add pot & plant" button */}
       <button
         ref={triggerRef}
         type="button"
@@ -55,6 +60,7 @@ export function PlantingLauncher({
         Add pot & plant
         {fixed ? null : <ChevronDown size={15} className="-mr-1 opacity-80" />}
       </button>
+      {/* Garden chooser dropdown */}
       {picking ? (
         <div className="animate-fade-in absolute left-0 top-full z-30 mt-2 w-[min(18rem,calc(100vw-2rem))] sm:left-auto sm:right-0 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl shadow-slate-950/10 dark:border-slate-800 dark:bg-slate-900 dark:shadow-black/40">
           <GardenSearchList
@@ -67,6 +73,7 @@ export function PlantingLauncher({
           />
         </div>
       ) : null}
+      {/* Side panel form for adding the pot and plant */}
       <AddPlantingPanel
         open={target !== null}
         onClose={() => setTarget(null)}

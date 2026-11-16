@@ -1,5 +1,6 @@
 "use client";
 
+// Left navigation sidebar with page links, dark mode switch and collapse button
 import {
   BarChart3,
   ChevronLeft,
@@ -20,12 +21,14 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSyncExternalStore, type ReactNode } from "react";
 
+// One link in the sidebar
 interface NavItem {
   to: string;
   label: string;
   icon: LucideIcon;
 }
 
+// Sidebar link groups and their pages
 export const navSections: { title: string; items: NavItem[] }[] = [
   {
     title: "Overview",
@@ -57,6 +60,7 @@ function subscribeTheme(listener: () => void) {
   return () => observer.disconnect();
 }
 
+// Switch between light and dark theme and remember the choice
 function setTheme(dark: boolean) {
   document.documentElement.classList.toggle("dark", dark);
   document.documentElement.style.colorScheme = dark ? "dark" : "light";
@@ -67,6 +71,7 @@ function setTheme(dark: boolean) {
   }
 }
 
+// Sidebar; can collapse to icons only on desktop
 export function Sidebar({
   onNavigate,
   collapsed = false,
@@ -78,6 +83,7 @@ export function Sidebar({
   /** Omitted in the mobile drawer, which has its own close button. */
   onToggleCollapsed?: () => void;
 }) {
+  // Current page path and whether dark mode is on
   const pathname = usePathname();
   const dark = useSyncExternalStore(
     subscribeTheme,
@@ -85,19 +91,19 @@ export function Sidebar({
     () => false,
   );
 
+  // Is this link the current page (or a sub-page of it)?
   function isActive(to: string) {
     return pathname === to || pathname.startsWith(to + "/");
   }
 
+  // App logo icon
   const logo = (
     <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-600 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-400">
       <Sprout size={20} />
     </span>
   );
 
-  // Every element stays mounted in both states and only animates width /
-  // opacity, with fixed left padding so icons never shift while the rail
-  // resizes. Icon centres sit at 36px = half the 72px collapsed rail.
+  // Everything stays mounted and only width/opacity animate, so icons don't shift
   return (
     <aside className="relative flex h-full flex-col border-r border-slate-200 bg-white dark:border-slate-800/80 dark:bg-slate-950">
       {/* Brand */}
@@ -169,6 +175,7 @@ export function Sidebar({
           ))}
         </Section>
 
+        {/* Dark mode switch with sun and moon icons */}
         <div className="mt-4 flex items-center pl-0.5">
           <Reveal collapsed={collapsed} className="pl-2.5 pr-2.5">
             <Sun size={16} className="text-slate-400" aria-hidden="true" />
@@ -179,8 +186,7 @@ export function Sidebar({
             aria-checked={dark}
             aria-label="Dark mode"
             onClick={() => setTheme(!dark)}
-            // Styled from the `dark` class (set before paint), not React state, so the
-            // switch is already in the right position before hydration.
+            // Styled from the `dark` class, not React state, so it is right on first paint
             className="group relative inline-flex h-6 w-11 shrink-0 items-center rounded-full bg-slate-200 transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600 dark:bg-emerald-600"
           >
             <span
@@ -222,6 +228,7 @@ function Reveal({
   );
 }
 
+// Group of links with a title (shown as a divider when collapsed)
 function Section({
   title,
   collapsed,
@@ -233,8 +240,7 @@ function Section({
   first: boolean;
   children: ReactNode;
 }) {
-  // Title and divider share one fixed-height row and cross-fade, so the list
-  // below never jumps vertically.
+  // Title and divider share one row and cross-fade so the list doesn't jump
   return (
     <div className={first ? "" : "mt-5"}>
       <div className="relative mb-2 h-4">
@@ -259,6 +265,7 @@ function Section({
   );
 }
 
+// Small label shown on hover when the sidebar is collapsed
 function Tooltip({ children }: { children: ReactNode }) {
   return (
     <span
@@ -270,6 +277,7 @@ function Tooltip({ children }: { children: ReactNode }) {
   );
 }
 
+// One sidebar link with icon, label and active highlight
 function NavLink({
   item,
   active,

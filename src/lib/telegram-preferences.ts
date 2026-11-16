@@ -1,5 +1,7 @@
+// Lets env vars turn each type of Telegram alert on or off
 import type { TelegramDeliveryEventType } from "@prisma/client";
 
+// Alert types that can be switched off
 type PreferenceName =
   | "PUMP_ACKNOWLEDGED"
   | "PUMP_FAILED"
@@ -7,6 +9,7 @@ type PreferenceName =
   | "DEVICE_OFFLINE"
   | "DEVICE_RECOVERED";
 
+// Env var that controls each alert type
 const ENVIRONMENT_KEYS: Record<PreferenceName, string> = {
   PUMP_ACKNOWLEDGED: "TELEGRAM_NOTIFY_PUMP_ACKNOWLEDGED",
   PUMP_FAILED: "TELEGRAM_NOTIFY_PUMP_FAILED",
@@ -15,14 +18,12 @@ const ENVIRONMENT_KEYS: Record<PreferenceName, string> = {
   DEVICE_RECOVERED: "TELEGRAM_NOTIFY_DEVICE_RECOVERED",
 };
 
+// On unless the value is exactly "false"
 function enabled(value: string | undefined) {
   return value?.trim().toLowerCase() !== "false";
 }
 
-/**
- * The configured Telegram chat is global, so preferences are global too.
- * Every category defaults on; only an explicit `false` disables a category.
- */
+// True if this alert type should be sent (all on unless set to "false")
 export function isTelegramEventEnabled(eventType: TelegramDeliveryEventType) {
   return enabled(process.env[ENVIRONMENT_KEYS[eventType as PreferenceName]]);
 }

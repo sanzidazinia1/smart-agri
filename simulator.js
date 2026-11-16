@@ -1,28 +1,13 @@
-/**
- * SmartAgri ESP32 IoT Node Simulator
- *
- * Acts as a software ESP32 for Phase 5:
- * - sends garden-level temperature and humidity
- * - sends pot-level soil moisture for the configured database Pot IDs
- *
- * Run with:
- *   node simulator.js
- *
- * Optional env:
- *   API_URL=http://localhost:3000
- *   DEVICE_ID=<registered hardwareId, not the database Device primary key>
- *   DEVICE_KEY=<key returned when the device was registered>
- *   POT_IDS=<comma-separated database Pot IDs in the device's garden>
- */
+// Fake ESP32 for testing without hardware: sends readings, obeys pump commands.
+// Run: npm run simulate (needs DEVICE_ID, DEVICE_KEY, POT_IDS in .env.development)
 
 const { loadEnvConfig } = require("@next/env");
 const path = require("node:path");
 
-// `node simulator.js` runs outside Next.js, so load .env using Next's own
-// environment loader. Resolve from this file, not process.cwd(), so it works
-// from any folder. Explicit shell variables still take precedence.
+// Load .env.development the same way Next.js does (shell values win)
 loadEnvConfig(path.resolve(__dirname), true); // development mode → .env.development
 
+// Settings: server address, device ID/key and the pots it sends for
 const BACKEND_URL = process.env.API_URL || process.env.BASE_URL || "http://localhost:3000";
 const DEVICE_ID = process.env.DEVICE_ID;
 const DEVICE_KEY = process.env.DEVICE_KEY;
@@ -31,26 +16,31 @@ const POT_IDS = (process.env.POT_IDS || "")
   .map((potId) => potId.trim())
   .filter(Boolean);
 
+// Stop with a clear message if settings are missing
 if (!DEVICE_ID || !DEVICE_KEY || POT_IDS.length === 0) {
   throw new Error(
     "DEVICE_ID (registered hardwareId), DEVICE_KEY, and POT_IDS (comma-separated database Pot IDs) are required.",
   );
 }
 
+// Pretend moisture + pump state for each pot
 const potStates = Object.fromEntries(
   POT_IDS.map((potId, index) => [potId, {
     moisture: [42, 55, 31][index % 3],
     pump: false,
   }]),
 );
-const highestSequence = Object.fromEntries(POT_IDS.map((potId) => [potId, 0]));
-const commandResults = new Map();
+const highestSequence = Object.fromEntries(POT_IDS.map((potId) => [potId, 0])); // newest command no. per pot
+const commandResults = new Map(); // results of commands already run (avoid repeats)
 let lastServerCommunicationAt = Date.now();
+// Safety: pumps switch off if the server is silent this long
 const FAILSAFE_MS = Number(process.env.DEVICE_COMMUNICATION_LOSS_FAILSAFE_SECONDS || 60) * 1000;
 
+// Pretend garden weather
 let temperature = 28.5;
 let humidity = 65;
 
+// Print what the simulator is connected to
 console.log("----------------------------------------------------");
 console.log(`SmartAgri ESP32 Simulator started [Device hardwareId: ${DEVICE_ID}]`);
 console.log(`Mapped Pots: ${POT_IDS.join(", ")}`);
@@ -58,6 +48,7 @@ console.log(`Posting to: ${BACKEND_URL}/api/iot/ingest`);
 console.log(`Polling:    ${BACKEND_URL}/api/iot/commands`);
 console.log("----------------------------------------------------");
 
+// Sends one set of readings to the server
 async function postIngest(payload) {
   const res = await fetch(`${BACKEND_URL}/api/iot/ingest`, {
     method: "POST",
@@ -83,6 +74,7 @@ async function postIngest(payload) {
   return data;
 }
 
+// Asks the server for waiting pump commands
 async function fetchCommands() {
   const res = await fetch(`${BACKEND_URL}/api/iot/commands?deviceId=${encodeURIComponent(DEVICE_ID)}`, {
     headers: {
@@ -105,6 +97,7 @@ async function fetchCommands() {
   return data.commands || [];
 }
 
+// Tells the server a command was received or carried out
 async function acknowledgeCommand(commandId, kind, success = true, error) {
   const res = await fetch(`${BACKEND_URL}/api/iot/commands`, {
     method: "POST",
@@ -136,6 +129,7 @@ async function acknowledgeCommand(commandId, kind, success = true, error) {
   return data;
 }
 
+// Gets commands and runs them (skips repeats and old ones)
 async function processCommands() {
   try {
     const commands = await fetchCommands();
@@ -156,6 +150,7 @@ async function processCommands() {
         continue;
       }
 
+      // Ignore commands older than the newest one already run
       if (command.sequence <= highestSequence[command.potId]) {
         const result = { success: false, error: "Stale command sequence" };
         commandResults.set(command.id, result);
@@ -176,6 +171,7 @@ async function processCommands() {
   }
 }
 
+// Changes the fake values a little: pump ON makes soil wetter
 function tickEnvironment() {
   if (Date.now() - lastServerCommunicationAt > FAILSAFE_MS) {
     for (const state of Object.values(potStates)) state.pump = false;
@@ -191,14 +187,14 @@ function tickEnvironment() {
   }
 }
 
+// Updates fake values, then sends them to the server
 async function sendTelemetry() {
   tickEnvironment();
   humidity = Math.round(Math.min(95, Math.max(20, humidity + (Math.random() - 0.5) * 1.5)) * 10) / 10;
 
   try {
     const response = await postIngest({
-      // The API accepts deviceId for legacy clients, but hardwareId is the
-      // device's registered wire identifier and is used by the ESP32 too.
+      // Same board ID field the real ESP32 uses
       hardwareId: DEVICE_ID,
       temperature,
       humidity,
@@ -221,6 +217,7 @@ async function sendTelemetry() {
   }
 }
 
+// Send readings every 5 s, check commands every 2 s
 setInterval(sendTelemetry, 5000);
 setInterval(processCommands, 2000);
 sendTelemetry();

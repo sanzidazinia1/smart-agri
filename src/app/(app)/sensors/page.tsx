@@ -1,7 +1,6 @@
 "use client";
 
-// PAGE: Sensors & devices across all gardens — status at a glance, search and
-// filters, and registering an ESP32/sensor (its one-time key is shown once).
+// Devices page: every ESP32 board, its status, ports, pots and board actions.
 import { Suspense, useCallback, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -42,11 +41,13 @@ import { apiDelete, apiPatch, apiPost } from "@/lib/api-client";
 import { useNow } from "@/components/ListPage";
 import { supportsRemotePorts } from "@/lib/device-pot";
 
+// Garden option shown in the filters and pickers
 interface Garden {
   id: string;
   name: string;
   location: string | null;
 }
+// One board as returned by /api/devices
 interface Device {
   id: string;
   name: string;
@@ -60,7 +61,7 @@ interface Device {
   pots: { id: string; label: string; port: number }[];
   /** How many pots this board can serve (one per port). */
   portCount: number;
-  /** Last report per port: probe reading (null = no probe reading) and pump relay state. */
+  /** Last report per port: moisture (null = no reading) and pump state. */
   portStatus: { port: number; moisture: number | null; pump: boolean | null }[] | null;
   /** e.g. "smartagri-2.9"; 2.9+ can add / remove ports from the app. */
   firmwareVersion: string | null;
@@ -68,11 +69,13 @@ interface Device {
   pendingActionAt: string | null;
 }
 
+// Remote commands the app can send to a board
 type DeviceAction = "RESTART" | "RESET_WIFI" | "SLEEP" | "FACTORY_RESET";
 
-/** Same as the server: an action the board hasn't picked up in 2 min is dropped. */
+/** Unclaimed board actions expire after 2 minutes (same as the server). */
 const ACTION_TTL_MS = 2 * 60 * 1000;
 
+// Labels, icons and confirm texts for each board action
 const ACTIONS: Record<
   DeviceAction,
   { label: string; icon: LucideIcon; doing: string; confirm: { title: string; message: string; confirmLabel: string; danger?: boolean }; done: string }
@@ -122,19 +125,21 @@ const ACTIONS: Record<
   },
 };
 
+// Which status tile is selected as a filter
 type StatusFilter = "all" | "online" | "attention" | "waiting";
 
+// Shared style for the form select boxes
 const fieldClass =
   "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950";
 
+// Groups a device status into online / attention / waiting
 function bucket(status: Device["status"]): Exclude<StatusFilter, "all"> {
   if (status === "ONLINE") return "online";
   if (status === "NEVER_SEEN") return "waiting";
   return "attention";
 }
 
-// ?claim=<hardwareId>&code=<pairingCode> (the board's setup-page link) opens
-// the Add device guide pre-filled; reading search params needs Suspense.
+// Page entry; Suspense is needed to read ?claim=&code= from the board's setup link
 export default function SensorsPage() {
   return (
     <Suspense fallback={null}>
@@ -143,11 +148,13 @@ export default function SensorsPage() {
   );
 }
 
+// Main page body: tiles, filters, device grid and the side panels
 function SensorsContent() {
   const { confirm, toast } = useFeedback();
   const searchParams = useSearchParams();
   const linkedBoard = searchParams.get("claim");
   const linkedCode = searchParams.get("code");
+  // Load gardens and devices (devices refresh every 3 s)
   const { data: gardens } = useSWR<Garden[]>("/api/gardens");
   const { data: devices, mutate } = useSWR<Device[]>("/api/devices", { refreshInterval: 3000 });
   const [query, setQuery] = useState("");
@@ -159,6 +166,7 @@ function SensorsContent() {
     linkedBoard ? { hardwareId: linkedBoard, code: linkedCode } : null,
   );
 
+  // Totals for the status tiles
   const counts = useMemo(() => {
     const all = devices ?? [];
     return {
@@ -169,6 +177,7 @@ function SensorsContent() {
     };
   }, [devices]);
 
+  // Devices that match the search, garden and status filters
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return (devices ?? []).filter((device) => {
@@ -183,6 +192,7 @@ function SensorsContent() {
 
   const filtersActive = query.trim() !== "" || gardenFilter !== "all" || statusFilter !== "all";
 
+  // Ask to confirm, then queue a board action (restart, reset Wi-Fi, ...)
   async function sendAction(device: Device, action: DeviceAction) {
     const spec = ACTIONS[action];
     const ok = await confirm({
@@ -201,6 +211,7 @@ function SensorsContent() {
     }
   }
 
+  // Cancel a board action that hasn't been picked up yet
   async function cancelAction(device: Device) {
     try {
       await apiDelete(`/api/devices/${device.id}/action`);
@@ -211,6 +222,7 @@ function SensorsContent() {
     }
   }
 
+  // Ask to confirm, then delete the device from the app
   async function remove(device: Device) {
     const ok = await confirm({
       title: `Delete ${device.name}?`,
@@ -245,8 +257,10 @@ function SensorsContent() {
         }
       />
 
+      {/* Boards waiting on the network to be added */}
       <NewDevicesFound onSetUp={(hardwareId) => setGuide({ hardwareId, code: null })} />
 
+      {/* Status tiles that also act as filters */}
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Tile icon={Cpu} label="Devices" value={counts.total} active={statusFilter === "all"} onClick={() => setStatusFilter("all")} />
         <Tile
@@ -274,6 +288,7 @@ function SensorsContent() {
         />
       </div>
 
+      {/* Search box, garden picker and clear button */}
       <div className="mb-5 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900 sm:flex-row sm:items-center">
         <label className="relative min-w-0 flex-1">
           <span className="sr-only">Search devices</span>
@@ -310,6 +325,7 @@ function SensorsContent() {
         ) : null}
       </div>
 
+      {/* Device grid: loading, empty, no matches, or the cards */}
       {!devices ? (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {[0, 1, 2].map((i) => (
@@ -352,6 +368,7 @@ function SensorsContent() {
         </div>
       )}
 
+      {/* Side panels: add device guide, assign and manual register */}
       <AddDeviceGuide
         open={guide !== null}
         onClose={() => setGuide(null)}
@@ -389,6 +406,7 @@ function SensorsContent() {
   );
 }
 
+// Clickable count tile used as a status filter
 function Tile({
   icon: Icon,
   label,
@@ -432,6 +450,7 @@ function Tile({
   );
 }
 
+// Card for one board: status, garden, ports, hardware ID and last seen
 function DeviceCard({
   device,
   onDelete,
@@ -448,15 +467,15 @@ function DeviceCard({
   onChanged: () => void;
 }) {
   const now = useNow(5000);
+  // Board action still waiting to be picked up (null if none or expired)
   const pending =
     device.pendingAction && device.pendingActionAt && now - new Date(device.pendingActionAt).getTime() < ACTION_TTL_MS ? ACTIONS[device.pendingAction] : null;
-  // Two separate questions, shown separately: is the board reachable (badge +
-  // dot), and is it set up (a pot to measure)? Mixing them made an online,
-  // unassigned board look like it had a connection problem.
+  // Online status and "needs a pot" are shown separately so they don't mix up
   const status = deviceStatus(device.status);
   const needsPot = device.pots.length === 0;
   const [copied, setCopied] = useState(false);
 
+  // Copy the hardware ID and briefly show a tick
   async function copyId() {
     try {
       await navigator.clipboard.writeText(device.hardwareId);
@@ -487,6 +506,7 @@ function DeviceCard({
         <DeviceMenu device={device} onDelete={onDelete} onAssign={onAssign} onAction={onAction} />
       </header>
 
+      {/* Warning when the board isn't connected to a pot */}
       {needsPot && !pending ? (
         <div className="mx-4 mb-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-500/10 dark:text-amber-200">
           <p className="flex items-start gap-1.5">
@@ -499,6 +519,7 @@ function DeviceCard({
         </div>
       ) : null}
 
+      {/* Pending board action with a cancel button */}
       {pending ? (
         <div className="mx-4 mb-3 flex items-center gap-2 rounded-lg bg-sky-50 px-3 py-2 text-xs text-sky-800 dark:bg-sky-500/10 dark:text-sky-200">
           <Loader2 size={13} className="shrink-0 animate-spin" />
@@ -509,6 +530,7 @@ function DeviceCard({
         </div>
       ) : null}
 
+      {/* Details: garden, ports, hardware ID, last seen */}
       <dl className="space-y-2 px-4 pb-4 text-xs">
         <Row label="Garden">
           {device.gardenId && device.garden ? (
@@ -548,16 +570,13 @@ function DeviceCard({
   );
 }
 
-/** Default wiring per port (firmware SOIL_PINS / RELAY_PINS). */
+/** Default ESP32 pins per port (firmware SOIL_PINS / RELAY_PINS). */
 const PROBE_PINS = [36, 39, 34, 35, 32, 33];
 const RELAY_PINS = [5, 18, 19, 21, 22, 23];
+// Most ports one board supports
 const MAX_PORTS = 6;
 
-/**
- * Every port on the board: its soil probe (reading, or "No probe" when nothing
- * valid comes in), its pump relay (on / off) and the pot it serves. Ports can
- * be added / removed here (firmware 2.9+ applies it without re-flashing).
- */
+/** List of the board's ports: probe reading, pump state, pot, add/remove port. */
 function PortList({ device, onAssign, onChanged }: { device: Device; onAssign: () => void; onChanged: () => void }) {
   const { toast } = useFeedback();
   const [busy, setBusy] = useState(false);
@@ -577,6 +596,7 @@ function PortList({ device, onAssign, onChanged }: { device: Device; onAssign: (
   let unusedFrom = last + 1;
   while (unusedFrom > 2 && !hasPot(unusedFrom - 1) && live && report.get(unusedFrom - 1)?.moisture == null) unusedFrom--;
 
+  // Change how many ports the board uses (adds or removes from the end)
   async function setPorts(next: number) {
     setBusy(true);
     try {
@@ -620,6 +640,7 @@ function PortList({ device, onAssign, onChanged }: { device: Device; onAssign: (
                 <span className="w-11 shrink-0 text-[11px] font-bold text-slate-600 dark:text-slate-300" title={`Wiring: ${pins}`}>
                   Port {port}
                 </span>
+                {/* Probe and pump chips, or "waiting" if the board hasn't reported */}
                 {waiting ? (
                   <span className={`${chip} bg-sky-50 text-sky-700 dark:bg-sky-500/10 dark:text-sky-300`}>
                     <Loader2 size={11} className="animate-spin" aria-hidden="true" />
@@ -651,6 +672,7 @@ function PortList({ device, onAssign, onChanged }: { device: Device; onAssign: (
                     </span>
                   </>
                 )}
+                {/* Linked pot (or connect button) and the port menu */}
                 <span className="ml-auto flex items-center gap-1">
                   {pot ? (
                     <Link
@@ -683,6 +705,7 @@ function PortList({ device, onAssign, onChanged }: { device: Device; onAssign: (
           );
         })}
       </dd>
+      {/* Buttons to remove unused ports or add a new one */}
       {remote && unusedFrom <= last ? (
         <button
           type="button"
@@ -716,6 +739,7 @@ function PortList({ device, onAssign, onChanged }: { device: Device; onAssign: (
   );
 }
 
+// Pot in the garden that can be put on a port
 interface GardenPot {
   id: string;
   label: string;
@@ -723,10 +747,7 @@ interface GardenPot {
   sensors: { id: string; name: string }[];
 }
 
-/**
- * One port's ⋮ menu: open / change / disconnect its pot, or remove the port
- * (only the last one — port numbers are tied to the board's pins).
- */
+/** One port's ⋮ menu: open, change or disconnect its pot, or remove the port. */
 function PortMenu({
   device,
   port,
@@ -754,10 +775,12 @@ function PortMenu({
   }, []);
   useDismiss(open, close, rootRef, triggerRef);
   const { confirm, toast } = useFeedback();
+  // Load the garden's pots only while the "pick a pot" list is open
   const { data: pots } = useSWR<GardenPot[]>(open && picking && device.gardenId ? `/api/pots?gardenId=${device.gardenId}` : null);
   const item =
     "flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-800";
 
+  // Close the menu, run a change, then show its message as a toast
   async function run(work: () => Promise<string>) {
     close();
     setBusy(true);
@@ -771,12 +794,14 @@ function PortMenu({
     }
   }
 
+  // Put the chosen pot on this port
   const connect = (target: GardenPot) =>
     run(async () => {
       await apiPatch(`/api/devices/${device.id}`, { ports: [{ port, potId: target.id }] });
       return `${target.label} is now on port ${port}.`;
     });
 
+  // Ask to confirm, then take the pot off this port
   async function disconnect() {
     if (!pot) return;
     const ok = await confirm({
@@ -792,6 +817,7 @@ function PortMenu({
     });
   }
 
+  // Ask to confirm, then remove this port (and any after it)
   async function removePort() {
     const ok = await confirm({
       title: `Remove ${range}?`,
@@ -809,7 +835,7 @@ function PortMenu({
     });
   }
 
-  // Pots that can go on this port: free ones, or ones on another port of this board (they move).
+  // Pots that can go on this port (free ones, or moved from another port)
   const choices = (pots ?? [])
     .filter((p) => p.id !== pot?.id)
     .map((p) => {
@@ -838,6 +864,7 @@ function PortMenu({
           <p className="px-2.5 pb-1.5 pt-1 text-[11px] text-slate-500 dark:text-slate-400">
             <b className="text-slate-700 dark:text-slate-200">Port {port}</b> · probe GPIO {PROBE_PINS[port - 1]} · relay GPIO {RELAY_PINS[port - 1]}
           </p>
+          {/* Pot picker view, or the normal menu items */}
           {picking ? (
             <>
               <p className="px-2.5 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
@@ -925,6 +952,7 @@ function PortMenu({
   );
 }
 
+// One label / value row in a device card
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex items-center justify-between gap-3">
@@ -934,11 +962,12 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   );
 }
 
-/** Garden details, Pots tab, scrolled to this pot. */
+/** Link to the garden's Pots tab, scrolled to this pot. */
 function potHref(gardenId: string, potId: string) {
   return `/gardens/${gardenId}?tab=pots&pot=${potId}`;
 }
 
+// The board's ⋮ menu: pots, move/rename, board actions and delete
 function DeviceMenu({
   device,
   onDelete,
@@ -1018,6 +1047,7 @@ function DeviceMenu({
           <p className="px-2.5 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
             Board{reachable ? "" : " · offline — can't reach it"}
           </p>
+          {/* Board actions (disabled while offline) */}
           {(["RESTART", "RESET_WIFI", "SLEEP", "FACTORY_RESET"] as const).map((action) => {
             const spec = ACTIONS[action];
             const danger = action === "FACTORY_RESET";
@@ -1061,6 +1091,7 @@ function DeviceMenu({
   );
 }
 
+// Board found on the network that isn't added yet
 interface FoundBoard {
   hardwareId: string;
   lastSeenAt: string;
@@ -1069,6 +1100,7 @@ interface FoundBoard {
 
 /** Boards that announced themselves on the network and are waiting to be added. */
 function NewDevicesFound({ onSetUp }: { onSetUp: (hardwareId: string) => void }) {
+  // Check for new boards every 4 s
   const { data: found } = useSWR<FoundBoard[]>("/api/devices/pairing", { refreshInterval: 4000 });
   if (!found?.length) return null;
 
@@ -1153,6 +1185,7 @@ function AssignPanel({
   );
 }
 
+// Form fields to rename a device and pick its garden and pot(s)
 function AssignFields({ device, gardens, onSaved }: { device: Device; gardens: Garden[]; onSaved: () => void }) {
   const [gardenId, setGardenId] = useState(device.gardenId ?? "");
   const [potId, setPotId] = useState(device.pots[0]?.id ?? "");
@@ -1164,10 +1197,12 @@ function AssignFields({ device, gardens, onSaved }: { device: Device; gardens: G
   const [name, setName] = useState(device.name);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  // Load pots of the chosen garden
   const { data: pots } = useSWR<{ id: string; label: string; plant: { commonName: string } | null }[]>(
     gardenId ? `/api/pots?gardenId=${gardenId}` : null,
   );
 
+  // Save name, garden and pot(s) for the device
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
@@ -1264,6 +1299,7 @@ function AssignFields({ device, gardens, onSaved }: { device: Device; gardens: G
   );
 }
 
+// Side panel to register a device by hand, then show its one-time key
 function RegisterPanel({
   open,
   onClose,
@@ -1276,6 +1312,7 @@ function RegisterPanel({
   onCreated: () => void;
 }) {
   const [created, setCreated] = useState<{ name: string; hardwareId: string; key: string } | null>(null);
+  // Clear the shown key and close the panel
   function close() {
     setCreated(null);
     onClose();
@@ -1331,6 +1368,7 @@ function RegisterPanel({
   );
 }
 
+// Form fields for manual device registration
 function RegisterFields({
   gardens,
   onCreated,
@@ -1345,10 +1383,12 @@ function RegisterFields({
   const [type, setType] = useState("esp32_node");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  // Load pots of the chosen garden
   const { data: pots } = useSWR<{ id: string; label: string; plant: { commonName: string } | null }[]>(
     gardenId ? `/api/pots?gardenId=${gardenId}` : null,
   );
 
+  // Create the device and pass back its one-time key
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError("");

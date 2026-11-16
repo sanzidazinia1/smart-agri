@@ -1,7 +1,6 @@
 "use client";
 
-// PAGE: Pots across all gardens — search/filter, live moisture and sensor at a
-// glance, and manage each pot (edit, watering, delete) from its ⋮ menu.
+// Pots page: every pot in all gardens with live moisture, filters and a ⋮ menu.
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import useSWR from "swr";
@@ -15,6 +14,7 @@ import { CardMenu, EmptyCard, HEALTH_PILL, ShowMore, SkeletonGrid, Tile, Toolbar
 import { SOIL_LABELS, type SoilType } from "@/lib/plant-catalog";
 import { apiDelete } from "@/lib/api-client";
 
+// A garden, used for the garden filter dropdown.
 interface Garden {
   id: string;
   name: string;
@@ -22,6 +22,7 @@ interface Garden {
   type: string;
 }
 
+// A pot with its plant, sensors and latest moisture reading.
 interface Pot {
   id: string;
   gardenId: string;
@@ -38,6 +39,7 @@ interface Pot {
   moistureRecordedAt: string | null;
 }
 
+// Options for the status filter dropdown and tiles.
 type StatusFilter = "all" | "dry" | "ok" | "wet" | "no-sensor" | "pump-on";
 const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
   { value: "all", label: "All statuses" },
@@ -47,10 +49,12 @@ const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
   { value: "no-sensor", label: "No device" },
   { value: "pump-on", label: "Pump running" },
 ];
+// How many pot cards to show before "Show more".
 const PAGE_SIZE = 12;
-/** Sensors report every 5 s; older than this isn't a live reading. */
+// Readings older than 60 s don't count as live (sensors send every 5 s).
 const LIVE_MS = 60_000;
 
+// Works out a pot's status (dry, ok, wet…) plus its label and colours.
 function potState(pot: Pot, now: number) {
   if (pot.sensors.length === 0) return { key: "no-sensor" as const, value: null, text: "No device", tone: "text-slate-400", bar: "bg-slate-300" };
   const live = pot.moistureRecordedAt && now - new Date(pot.moistureRecordedAt).getTime() <= LIVE_MS ? pot.currentMoisture : null;
@@ -60,17 +64,21 @@ function potState(pot: Pot, now: number) {
   return { key: "ok" as const, value: live, text: "Just right", tone: "text-emerald-600 dark:text-emerald-400", bar: "bg-emerald-500" };
 }
 
+// The pots page component.
 export default function PotsPage() {
   const { confirm, toast } = useFeedback();
+  // Load gardens once and pots every 3 seconds for live moisture.
   const { data: gardens } = useSWR<Garden[]>("/api/gardens");
   const { data: pots, mutate } = useSWR<Pot[]>("/api/pots", { refreshInterval: 3000 });
   const now = useNow();
+  // Search, filter, paging and "editing which pot" state.
   const [query, setQuery] = useState("");
   const [gardenFilter, setGardenFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [shown, setShown] = useState(PAGE_SIZE);
   const [editing, setEditing] = useState<Pot | null>(null);
 
+  // Numbers shown on the summary tiles.
   const counts = useMemo(() => {
     const list = pots ?? [];
     const keys = list.map((pot) => potState(pot, now).key);
@@ -82,6 +90,7 @@ export default function PotsPage() {
     };
   }, [pots, now]);
 
+  // Pots after search + filters, sorted by garden then pot name.
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return (pots ?? [])
@@ -96,8 +105,10 @@ export default function PotsPage() {
   }, [pots, gardenFilter, statusFilter, query, now]);
 
   const filtersActive = query.trim() !== "" || gardenFilter !== "all" || statusFilter !== "all";
+  // Go back to the first page of results.
   const resetPaging = () => setShown(PAGE_SIZE);
 
+  // Asks for confirmation, then deletes the pot.
   async function remove(pot: Pot) {
     const ok = await confirm({
       title: `Delete ${pot.label}?`,
@@ -115,6 +126,7 @@ export default function PotsPage() {
     }
   }
 
+  // Clicking a tile turns its filter on, or off if already on.
   const toggle = (value: StatusFilter) => {
     setStatusFilter(statusFilter === value ? "all" : value);
     resetPaging();
@@ -128,6 +140,7 @@ export default function PotsPage() {
         action={<PlantingLauncher gardens={gardens ?? []} gardenId={gardenFilter} onCreated={() => mutate()} />}
       />
 
+      {/* Summary tiles (also act as quick filters) */}
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Tile icon={Package} label="Pots" value={counts.total} active={statusFilter === "all"} onClick={() => toggle("all")} />
         <Tile icon={CircleAlert} label="Need water" value={counts.dry} tone={counts.dry ? "amber" : undefined} active={statusFilter === "dry"} onClick={() => toggle("dry")} />
@@ -135,6 +148,7 @@ export default function PotsPage() {
         <Tile icon={Droplets} label="Pumps running" value={counts.pumpsOn} tone={counts.pumpsOn ? "sky" : undefined} active={statusFilter === "pump-on"} onClick={() => toggle("pump-on")} />
       </div>
 
+      {/* Search box and filters */}
       <Toolbar
         query={query}
         onQuery={(value) => {
@@ -173,6 +187,7 @@ export default function PotsPage() {
         }}
       />
 
+      {/* Pot cards: loading, empty, no matches or the grid */}
       {!pots ? (
         <SkeletonGrid />
       ) : pots.length === 0 ? (
@@ -190,6 +205,7 @@ export default function PotsPage() {
         </>
       )}
 
+      {/* Slide-over panel for editing a pot */}
       <EditPotPanel
         open={editing !== null}
         onClose={() => setEditing(null)}
@@ -215,12 +231,14 @@ export default function PotsPage() {
   );
 }
 
+// One pot card: name, plant, moisture bar, device and pump status.
 function PotCard({ pot, now, onEdit, onDelete }: { pot: Pot; now: number; onEdit: () => void; onDelete: () => void }) {
   const state = potState(pot, now);
   const low = pot.moistureOnThreshold;
   const high = Math.max(pot.moistureOffThreshold, low);
   const sensor = pot.sensors[0];
   const health = pot.plant?.healthStatus;
+  // Link to this pot inside its garden page.
   const potHref = `/gardens/${pot.gardenId}?tab=pots&pot=${pot.id}`;
 
   return (
@@ -251,6 +269,7 @@ function PotCard({ pot, now, onEdit, onDelete }: { pot: Pot; now: number; onEdit
         />
       </header>
 
+      {/* Moisture number and bar with the target range */}
       <div className="px-4">
         <div className="flex items-end justify-between">
           <p className="text-3xl font-black leading-none">
@@ -273,6 +292,7 @@ function PotCard({ pot, now, onEdit, onDelete }: { pot: Pot; now: number; onEdit
         </p>
       </div>
 
+      {/* Device, pump and mode badges */}
       <footer className="mt-4 flex flex-wrap items-center gap-2 border-t border-slate-100 px-4 py-2.5 text-[11px] dark:border-slate-800">
         <span className="flex min-w-0 items-center gap-1.5 font-semibold text-slate-600 dark:text-slate-300">
           <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${sensor ? deviceStatus(sensor.status).dot : "bg-slate-300 dark:bg-slate-600"}`} />

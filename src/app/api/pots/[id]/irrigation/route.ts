@@ -1,5 +1,4 @@
-// PHASE 6: Per-pot irrigation configuration and logical pump state.
-// Backend-owned only: this stores decisions/config, but does not deliver ESP32 commands.
+// API /api/pots/[id]/irrigation: a pot's watering mode and moisture limits
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireUser } from "@/lib/api-auth";
@@ -7,8 +6,10 @@ import { prisma } from "@/lib/db";
 import { findPotDevice, pumpStateToCommand, queuePumpCommand } from "@/lib/device-commands";
 import { decidePotIrrigation, validatePotIrrigationThresholds } from "@/lib/irrigation";
 
+// Safety: readings older than 10 minutes are too old to act on
 const FRESH_MOISTURE_WINDOW_MS = 10 * 60 * 1000;
 
+// Validation schema: watering settings that may be changed (no extra keys)
 const schema = z
   .object({
     irrigationMode: z.enum(["AUTO", "MANUAL"]).optional(),
@@ -17,6 +18,7 @@ const schema = z
   })
   .strict();
 
+// Load the user's pot with its settings and latest moisture reading
 async function getPot(id: string, userId: string) {
   return prisma.pot.findFirst({
     where: { id, userId },
@@ -39,10 +41,12 @@ async function getPot(id: string, userId: string) {
   });
 }
 
+// GET: return the pot's current watering settings
 export async function GET(
   _req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  // Auth check: only logged-in users
   const gate = await requireUser();
   if (gate instanceof NextResponse) return gate;
 
@@ -55,10 +59,12 @@ export async function GET(
   return NextResponse.json({ success: true, pot });
 }
 
+// PATCH: save settings; in AUTO mode, check now if the pump should change
 export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  // Auth check: only logged-in users
   const gate = await requireUser();
   if (gate instanceof NextResponse) return gate;
 
@@ -85,6 +91,7 @@ export async function PATCH(
   const nextOffThreshold =
     parsed.data.moistureOffThreshold ?? pot.moistureOffThreshold;
 
+  // "Start watering" level must be below "stop watering" level
   if (!validatePotIrrigationThresholds(nextOnThreshold, nextOffThreshold)) {
     return NextResponse.json(
       { error: "moistureOnThreshold must be less than moistureOffThreshold" },
@@ -93,6 +100,7 @@ export async function PATCH(
   }
 
   const nextMode = parsed.data.irrigationMode ?? pot.irrigationMode;
+  // DB write: save the new settings
   const updated = await prisma.pot.update({
     where: { id: pot.id },
     data: parsed.data,
@@ -117,6 +125,7 @@ export async function PATCH(
       parsed.data.moistureOnThreshold !== undefined ||
       parsed.data.moistureOffThreshold !== undefined);
 
+  // AUTO check: needs a fresh reading and an online board to queue a command
   if (shouldEvaluateAuto) {
     const latestMoisture = pot.readings[0];
     if (!latestMoisture) {
@@ -166,6 +175,7 @@ export async function PATCH(
     }
   }
 
+  // Log mode changes in the irrigation history
   if (parsed.data.irrigationMode) {
     await prisma.irrigationEvent.create({
       data: {

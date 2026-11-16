@@ -1,13 +1,13 @@
-// TASK: Mark a computed garden alert as resolved (POST) or undo that (DELETE).
-// Resolutions are cleared automatically by the dashboard route once the
-// alert's condition is gone, so a recurring problem alerts again.
+// API /api/gardens/[id]/alerts/resolve: mark a garden alert resolved, or undo it
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireUser } from "@/lib/api-auth";
 import { prisma } from "@/lib/db";
 
+// Validation schema: which alert to resolve
 const schema = z.object({ alertId: z.string().trim().min(1).max(200) });
 
+// Shared check: logged in, valid alertId, and the garden is the user's
 async function parse(req: Request, params: Promise<{ id: string }>) {
   const gate = await requireUser();
   if (gate instanceof NextResponse) return gate;
@@ -22,6 +22,7 @@ async function parse(req: Request, params: Promise<{ id: string }>) {
   return { userId: gate, gardenId: garden.id, alertKey: parsed.data.alertId };
 }
 
+// POST: mark the alert resolved (it comes back if the problem returns later)
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const target = await parse(req, params);
   if (target instanceof NextResponse) return target;
@@ -34,6 +35,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   return NextResponse.json({ resolved: true });
 }
 
+// DELETE: undo the resolve so the alert shows again
 export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const target = await parse(req, params);
   if (target instanceof NextResponse) return target;

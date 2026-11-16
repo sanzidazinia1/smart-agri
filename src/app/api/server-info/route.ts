@@ -1,11 +1,11 @@
-// TASK: The address boards should use to reach this server. A phone or ESP32
-// can't use "localhost", so list this machine's LAN addresses for the
-// "Add device" guide.
+// API /api/server-info: the server address a board should use (not "localhost")
 import os from "node:os";
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/api-auth";
 
+// GET: list this server's reachable URLs for the "Add device" guide
 export async function GET(req: Request) {
+  // Auth check: only logged-in users
   const gate = await requireUser();
   if (gate instanceof NextResponse) return gate;
 
@@ -16,6 +16,7 @@ export async function GET(req: Request) {
     const proto = req.headers.get("x-forwarded-proto") ?? "https";
     return NextResponse.json({ serverUrls: [`${proto}://${host}`] });
   }
+  // Local run: list this computer's Wi-Fi/LAN addresses
   const port = url.port || (url.protocol === "https:" ? "443" : "80");
   const suffix = ["80", "443"].includes(port) ? "" : `:${port}`;
   const addresses = Object.values(os.networkInterfaces())

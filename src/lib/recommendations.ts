@@ -1,9 +1,8 @@
-// Soil & environmental recommendation engine (proposal feature 4).
-// Rules-based: compares the latest readings against ideal ranges
-// (per-plant PlantThreshold, falling back to sensible defaults).
+// Gives care tips by comparing latest readings to the plant's ideal ranges
 
 import { defaultThreshold } from "@/lib/defaults";
 
+// A plant's ideal ranges (missing values use the defaults)
 export interface Thresholds {
   soilMoistureMin?: number | null;
   soilMoistureMax?: number | null;
@@ -13,12 +12,14 @@ export interface Thresholds {
   humidityMax?: number | null;
 }
 
+// One care tip
 export interface Recommendation {
   metric: string;
   severity: "info" | "warning" | "critical";
   message: string;
 }
 
+// Builds care tips for moisture, temperature, humidity and rain
 export function buildRecommendations(params: {
   moisture?: number | null;
   temperature?: number | null;

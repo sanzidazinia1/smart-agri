@@ -1,7 +1,6 @@
 "use client";
 
-// Building blocks shared by the Pots and Plants list pages: search/filter
-// toolbar, summary tiles, a card ⋮ menu, empty state and loading skeleton.
+// Shared pieces for the Pots and Plants list pages (toolbar, tiles, menus…)
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { EllipsisVertical, Search, X, type LucideIcon } from "lucide-react";
@@ -19,6 +18,7 @@ export function useNow(intervalMs = 15000) {
   return now;
 }
 
+// Badge colours for each plant health status
 export const HEALTH_PILL: Record<string, string> = {
   healthy: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300",
   diseased: "bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-300",
@@ -27,6 +27,7 @@ export const HEALTH_PILL: Record<string, string> = {
   unknown: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
 };
 
+// Search box + garden filter + extra filters + Clear button
 export function Toolbar({
   query,
   onQuery,
@@ -50,6 +51,7 @@ export function Toolbar({
 }) {
   return (
     <div className="mb-5 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900 lg:flex-row lg:items-center">
+      {/* Search box */}
       <label className="relative min-w-0 flex-1">
         <span className="sr-only">Search</span>
         <Search size={16} aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -61,6 +63,7 @@ export function Toolbar({
           className="w-full rounded-lg border border-slate-300 bg-white py-2 pl-9 pr-3 text-sm placeholder:text-slate-400 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-slate-700 dark:bg-slate-950"
         />
       </label>
+      {/* Garden filter, extra filters and Clear button */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <GardenPicker gardens={gardens} value={gardenFilter} onChange={onGarden} label="" allLabel="All gardens" className="w-full sm:w-64" />
         {extra}
@@ -79,9 +82,11 @@ export function Toolbar({
   );
 }
 
+// Shared style for filter dropdowns on list pages
 export const selectClass =
   "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950 sm:w-44";
 
+// Icon colours for summary tiles
 const TILE_TONE: Record<string, string> = {
   amber: "bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400",
   sky: "bg-sky-50 text-sky-600 dark:bg-sky-500/10 dark:text-sky-400",
@@ -125,6 +130,7 @@ export function Tile({
   );
 }
 
+// One item in a card's ⋮ menu (link or action)
 export interface CardMenuItem {
   icon: LucideIcon;
   label: string;
@@ -133,16 +139,20 @@ export interface CardMenuItem {
   danger?: boolean;
 }
 
+// ⋮ button on a card that opens a small actions menu
 export function CardMenu({ label, items }: { label: string; items: CardMenuItem[] }) {
+  // Menu open state, refs and close-on-outside-click handling
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const close = useCallback(() => setOpen(false), []);
   useDismiss(open, close, rootRef, triggerRef);
+  // Shared style for menu items
   const base = "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm font-medium";
 
   return (
     <div ref={rootRef} className="relative -mr-1.5 -mt-1">
+      {/* ⋮ button */}
       <button
         ref={triggerRef}
         type="button"
@@ -154,6 +164,7 @@ export function CardMenu({ label, items }: { label: string; items: CardMenuItem[
       >
         <EllipsisVertical size={16} />
       </button>
+      {/* Dropdown menu items */}
       {open ? (
         <div
           role="menu"
@@ -197,6 +208,7 @@ export function CardMenu({ label, items }: { label: string; items: CardMenuItem[
   );
 }
 
+// Friendly message box shown when a list is empty
 export function EmptyCard({ icon: Icon, title, text, action }: { icon: LucideIcon; title: string; text: string; action?: ReactNode }) {
   return (
     <Card className="flex flex-col items-center py-14 text-center">
@@ -210,6 +222,7 @@ export function EmptyCard({ icon: Icon, title, text, action }: { icon: LucideIco
   );
 }
 
+// "Show more" button for long lists; hidden when nothing is left
 export function ShowMore({ left, onClick }: { left: number; onClick: () => void }) {
   if (left <= 0) return null;
   return (
@@ -225,6 +238,7 @@ export function ShowMore({ left, onClick }: { left: number; onClick: () => void 
   );
 }
 
+// Grey placeholder cards shown while data loads
 export function SkeletonGrid() {
   return (
     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3" aria-hidden="true">

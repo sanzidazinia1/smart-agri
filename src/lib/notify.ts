@@ -1,7 +1,7 @@
-// Writing in-app notifications (the header bell). Kept free of other app
-// imports so any module, including transactions, can use it.
+// Creates in-app bell notifications (no app imports, so any file can use it)
 import type { NotificationType, Prisma, Severity } from "@prisma/client";
 
+// The data for one notification
 export interface AppNotification {
   userId: string;
   title: string;
@@ -14,13 +14,15 @@ export interface AppNotification {
   plantId?: string | null;
 }
 
+// The database (or a transaction) that can save notifications
 type NotificationStore = Pick<Prisma.TransactionClient, "notification">;
 
+// Saves a new notification
 export function createAppNotification(store: NotificationStore, notification: AppNotification) {
   return store.notification.create({ data: notification });
 }
 
-/** Creates the notification unless one with the same title (and pot) already exists since `since`. */
+// Saves a notification unless the same one (title + pot) exists since `since`
 export async function createAppNotificationOnce(store: NotificationStore, notification: AppNotification, since: Date) {
   const existing = await store.notification.findFirst({
     where: {
@@ -35,5 +37,6 @@ export async function createAppNotificationOnce(store: NotificationStore, notifi
   return createAppNotification(store, notification);
 }
 
+// Link to a pot's watering page, used when a notification is clicked
 export const potActionUrl = (gardenId: string | null | undefined, potId: string) =>
   gardenId ? `/irrigation?garden=${gardenId}&pot=${potId}` : "/irrigation";

@@ -51,3 +51,6 @@ next-env.d.ts
 # python caches
 __pycache__/
 *.pyc
+
+# npm cache (local only)
+/.npm-cache/

@@ -1,3 +1,4 @@
+// Simple labelled text input used in forms
 export function Input({
   label,
   value,

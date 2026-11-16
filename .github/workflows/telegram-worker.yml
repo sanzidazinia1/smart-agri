@@ -1,11 +1,14 @@
 
+# GitHub Action that sends waiting Telegram alerts every 5 minutes.
 name: Telegram Delivery Worker
 
+# Run every 5 minutes, or by hand from the Actions tab
 on:
   schedule:
     - cron: "*/5 * * * *"
   workflow_dispatch:
 
+# Never run two copies at the same time
 concurrency:
   group: telegram-delivery-worker
   cancel-in-progress: false
@@ -17,9 +20,10 @@ jobs:
 
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
-      # Same value as the web app: decrypts each user's saved Telegram bot token.
+      # Same as the web app: decrypts each user's saved Telegram bot token
       AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
 
+    # Install the app, then run the worker script
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

@@ -1,4 +1,5 @@
 "use client";
+// Sign-up form: creates a new account, then logs the user straight in.
 
 import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
@@ -7,12 +8,13 @@ import { Check, KeyRound, Mail, User, X } from "lucide-react";
 import { apiPost } from "@/lib/api-client";
 import { AuthError, AuthField, AuthSubmit } from "@/components/AuthFields";
 
+// Password rules shown under the password box (each must pass).
 const RULES: { label: string; test: (password: string) => boolean }[] = [
   { label: "At least 8 characters", test: (p) => p.length >= 8 },
   { label: "A letter and a number", test: (p) => /[a-z]/i.test(p) && /\d/.test(p) },
 ];
 
-
+// The name/email/password form shown on the register page.
 export function RegisterForm() {
   const router = useRouter();
   const [userName, setUserName] = useState("");
@@ -20,8 +22,10 @@ export function RegisterForm() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  // True only when the password passes every rule.
   const rulesMet = RULES.every((rule) => rule.test(password));
 
+  // Creates the account via the API, then signs in and opens the dashboard.
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!rulesMet) return;

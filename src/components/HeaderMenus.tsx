@@ -1,5 +1,6 @@
 "use client";
 
+// Top bar menus: notifications bell and user account menu
 import { Bell, CheckCheck, LogOut, Settings } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -9,6 +10,7 @@ import useSWR from "swr";
 import { Badge, severityTone } from "@/components/ui";
 import { apiPatch } from "@/lib/api-client";
 
+// One notification as returned by the API
 interface Notification {
   id: string;
   severity: string;
@@ -46,6 +48,7 @@ export function useDismiss(
   }, [open, close, rootRef, triggerRef]);
 }
 
+// Floating box that drops down under a top bar button
 function Popover({ children, className = "" }: { children: ReactNode; className?: string }) {
   return (
     <div
@@ -56,6 +59,7 @@ function Popover({ children, className = "" }: { children: ReactNode; className?
   );
 }
 
+// Turn a timestamp into short text like "5m ago"
 function timeAgo(iso: string) {
   const seconds = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
   if (seconds < 60) return "just now";
@@ -66,7 +70,9 @@ function timeAgo(iso: string) {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
+// Bell button with unread count and a dropdown of recent notifications
 export function NotificationsMenu() {
+  // Router, open state, refs and notification data (refreshed every 30 s)
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -75,16 +81,19 @@ export function NotificationsMenu() {
   const { data, mutate } = useSWR<Notification[]>("/api/notifications", {
     refreshInterval: 30000,
   });
+  // Unread count and the 6 newest notifications
   const unread = data?.filter((n) => n.status === "unread").length ?? 0;
   const recent = (data ?? []).slice(0, 6);
   const close = useCallback(() => setOpen(false), []);
   useDismiss(open, close, rootRef, triggerRef);
 
+  // Mark every notification as read
   async function markAll() {
     await apiPatch("/api/notifications", { all: true });
     mutate();
   }
 
+  // Open a notification: mark it read and go to its page
   async function openNotification(notification: Notification) {
     setOpen(false);
     if (notification.status === "unread") {
@@ -95,6 +104,7 @@ export function NotificationsMenu() {
 
   return (
     <div ref={rootRef} className="relative">
+      {/* Bell button with unread count */}
       <button
         ref={triggerRef}
         type="button"
@@ -114,6 +124,7 @@ export function NotificationsMenu() {
 
       {open ? (
         <Popover className="w-[min(22rem,calc(100vw-2rem))]">
+          {/* Header with "Mark all read" */}
           <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3 dark:border-slate-800">
             <p className="text-sm font-bold">
               Notifications
@@ -131,6 +142,7 @@ export function NotificationsMenu() {
             ) : null}
           </div>
 
+          {/* Recent notifications list, or an empty/loading message */}
           {recent.length ? (
             <ul className="max-h-96 divide-y divide-slate-100 overflow-y-auto dark:divide-slate-800">
               {recent.map((notification) => {
@@ -174,6 +186,7 @@ export function NotificationsMenu() {
             </div>
           )}
 
+          {/* Link to the full notifications page */}
           <Link
             href="/notifications"
             onClick={() => setOpen(false)}
@@ -194,24 +207,26 @@ function initialsFor(name: string) {
   return letters.toUpperCase();
 }
 
+// Avatar button with a dropdown for Settings and Log out
 export function UserMenu({ email, userName = null }: { email: string; userName?: string | null }) {
+  // Open state, refs and close-on-outside-click handling
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const close = useCallback(() => setOpen(false), []);
   useDismiss(open, close, rootRef, triggerRef);
-  // Same SWR key as the Settings page, so saving a new name or email there
-  // updates this menu immediately. The session email is only a fallback.
-  // The server-rendered name is the starting value, so nothing flashes on load.
+  // Shares the Settings page's data so name changes show here at once
   const { data: profile } = useSWR<{ email: string; userName: string | null }>("/api/profile", {
     fallbackData: { email, userName },
   });
+  // Email, display name and initials shown in the menu
   const currentEmail = profile?.email ?? email;
   const name = profile?.userName?.trim() || currentEmail.split("@")[0];
   const initials = initialsFor(name);
 
   return (
     <div ref={rootRef} className="relative">
+      {/* Avatar button */}
       <button
         ref={triggerRef}
         type="button"
@@ -231,6 +246,7 @@ export function UserMenu({ email, userName = null }: { email: string; userName?:
 
       {open ? (
         <Popover className="w-64">
+          {/* User name and email */}
           <div className="flex items-center gap-3 border-b border-slate-100 px-4 py-3 dark:border-slate-800">
             <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-emerald-600 text-sm font-bold text-white">
               {initials}
@@ -240,6 +256,7 @@ export function UserMenu({ email, userName = null }: { email: string; userName?:
               <span className="block truncate text-xs text-slate-500 dark:text-slate-400">{currentEmail}</span>
             </span>
           </div>
+          {/* Settings link and Log out button */}
           <div role="menu" className="p-1.5">
             <Link
               role="menuitem"

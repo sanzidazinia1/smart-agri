@@ -1,3 +1,6 @@
+// Builds a garden's alerts (dry soil, offline board, rain, disease, pump failure)
+
+// One alert shown on a garden
 export interface GardenAlert {
   id: string;
   severity: "critical" | "warning" | "info";
@@ -8,6 +11,7 @@ export interface GardenAlert {
   plantId?: string;
 }
 
+// Everything needed to build a garden's alerts
 type AlertInput = {
   gardenId: string;
   pots: { id: string; label: string; plant: { id: string; commonName: string } | null; moisture: number | null; moistureOnThreshold: number }[];
@@ -17,6 +21,7 @@ type AlertInput = {
   failedCommands: { id: string; potId: string; error: string | null }[];
 };
 
+// Turns pot, board, weather and diagnosis data into a list of alerts
 export function buildGardenAlerts(input: AlertInput): GardenAlert[] {
   const alerts: GardenAlert[] = [];
   for (const pot of input.pots) {
@@ -38,7 +43,7 @@ export function buildGardenAlerts(input: AlertInput): GardenAlert[] {
   }
   for (const prediction of input.latestPredictions) {
     const healthy = (prediction.className ?? prediction.predictedDisease).toLowerCase().includes("healthy");
-    // Keyed by prediction so resolving one diagnosis doesn't hide a later one.
+    // Keyed by prediction so resolving one doesn't hide a later diagnosis
     const id = prediction.id ? `disease-${prediction.potId}-${prediction.id}` : `disease-${prediction.potId}`;
     if (!healthy) alerts.push({ id, severity: "warning", title: "Disease detected", message: prediction.predictedDisease, gardenId: input.gardenId, potId: prediction.potId, plantId: prediction.plantId });
   }
@@ -48,11 +53,7 @@ export function buildGardenAlerts(input: AlertInput): GardenAlert[] {
   return alerts;
 }
 
-/**
- * Hide alerts the user marked resolved. Resolutions whose alert is no longer
- * active are returned as `stale` so the caller can delete them — that way the
- * same alert shows again if its condition comes back later.
- */
+// Hides resolved alerts; returns old resolutions as "stale" so they can be deleted
 export function applyAlertResolutions(
   alerts: GardenAlert[],
   resolutions: Iterable<string | { alertKey: string; resolvedAt: Date }>,

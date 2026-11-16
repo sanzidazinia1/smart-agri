@@ -1,13 +1,12 @@
 "use client";
 
-// Searchable pot picker across all gardens: "#3 · POT-3 · Aloe vera", with the
-// garden underneath. Search by pot number, name, plant or garden — works the
-// same with 3 pots or 1,000.
+// Searchable pot picker across all gardens (by number, name, plant or garden)
 import { useCallback, useId, useRef, useState } from "react";
 import { ChevronDown, Sprout, Trees } from "lucide-react";
 import { useDismiss } from "@/components/HeaderMenus";
 import { SearchList } from "@/components/SearchList";
 
+// Pot fields the picker needs
 export interface PickerPot {
   id: string;
   number: number;
@@ -17,6 +16,7 @@ export interface PickerPot {
   plant: { id: string; commonName: string } | null;
 }
 
+// Pot dropdown; `value` is the selected pot id
 export function PotPicker({
   pots,
   value,
@@ -31,6 +31,7 @@ export function PotPicker({
   requirePlant?: boolean;
   className?: string;
 }) {
+  // Open state, refs and close-on-outside-click handling
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -38,12 +39,14 @@ export function PotPicker({
   const close = useCallback(() => setOpen(false), []);
   useDismiss(open, close, rootRef, triggerRef);
 
+  // Pots sorted by number, plus a quick id lookup and the selected pot
   const sorted = [...pots].sort((a, b) => a.number - b.number);
   const byId = new Map(sorted.map((pot) => [pot.id, pot]));
   const selected = byId.get(value);
 
   return (
     <div ref={rootRef} className={`relative ${className}`}>
+      {/* Button showing the current pot */}
       <button
         ref={triggerRef}
         id={triggerId}
@@ -67,6 +70,7 @@ export function PotPicker({
         <ChevronDown size={16} className={`shrink-0 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
 
+      {/* Dropdown with the searchable pot list */}
       {open ? (
         <div className="animate-fade-in absolute left-0 right-0 top-full z-30 mt-1.5 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl shadow-slate-950/10 dark:border-slate-800 dark:bg-slate-900 dark:shadow-black/40">
           <SearchList
@@ -82,6 +86,7 @@ export function PotPicker({
               keywords: [`pot-${pot.number}`, `pot ${pot.number}`],
               disabled: requirePlant && !pot.plant,
             }))}
+            // Pick the pot, close the list and return focus to the button
             onChoose={(item) => {
               const pot = byId.get(item.id);
               if (!pot) return;

@@ -1,6 +1,4 @@
-# Attach the existing SmartAgri web service and this cron service to the same
-# Render environment group (or configure the listed variables on both).
-# Secrets are deliberately not stored in this file.
+# Render cron job that sends waiting Telegram alerts every 5 min (secrets set on Render).
 services:
   - type: cron
     name: smartagriai-telegram-delivery
@@ -11,6 +9,6 @@ services:
     envVars:
       - key: DATABASE_URL
         sync: false
-      # Same value as the web app: decrypts each user's saved bot token.
+      # Same as the web app: decrypts each user's saved bot token
       - key: AUTH_SECRET
         sync: false

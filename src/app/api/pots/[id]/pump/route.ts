@@ -1,4 +1,4 @@
-// PHASE 7: Manual pot pump commands. UI talks only to this backend endpoint.
+// API /api/pots/[id]/pump: turn a pot's pump on/off by hand (manual mode)
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireUser } from "@/lib/api-auth";
@@ -11,6 +11,7 @@ import {
 import { prisma } from "@/lib/db";
 import { getDeviceConnectionStatus } from "@/lib/device-status";
 
+// Validation schema: pumpState and/or command; if both, they must agree
 const schema = z
   .object({
     pumpState: z.enum(["on", "off"]).optional(),
@@ -24,10 +25,12 @@ const schema = z
     { message: "Provide one pump command, or matching command and pumpState values" },
   );
 
+// POST: run safety checks, then queue a PUMP_ON/PUMP_OFF command for the board
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  // Auth check: only logged-in users
   const gate = await requireUser();
   if (gate instanceof NextResponse) return gate;
 
@@ -44,6 +47,7 @@ export async function POST(
   }
 
   const { id } = await params;
+  // Ownership check: the pot (and its garden) must belong to this user
   const pot = await prisma.pot.findFirst({
     where: { id, userId: gate },
     select: {
@@ -60,6 +64,7 @@ export async function POST(
     return NextResponse.json({ error: "Pot not found" }, { status: 404 });
   }
 
+  // Safety: manual commands only in MANUAL mode, so they don't fight auto mode
   if (pot.irrigationMode !== "MANUAL") {
     return NextResponse.json(
       { error: "Pump commands require MANUAL irrigation mode" },
@@ -78,6 +83,7 @@ export async function POST(
   const command =
     parsed.data.command ?? pumpStateToCommand(parsed.data.pumpState ?? "off");
 
+  // Safety: never queue PUMP_ON for an offline board
   const isOnline = getDeviceConnectionStatus(device.lastSeenAt) === "ONLINE";
   if (!isOnline && command === "PUMP_ON") {
     return NextResponse.json(
@@ -91,9 +97,7 @@ export async function POST(
     orderBy: { createdAt: "desc" },
     select: { command: true },
   });
-  // An offline MANUAL OFF is deliberately queued even if the last server-side
-  // confirmation was already OFF: the physical relay may have changed while
-  // communication was lost, and OFF is the safety command.
+  // Skip if already in that state; but OFF to an offline board is always sent
   if ((command === "PUMP_ON" || isOnline) && commandToPumpState(command) === pot.pumpState &&
     (!outstanding || outstanding.command === command)) {
     return NextResponse.json({
@@ -103,6 +107,7 @@ export async function POST(
     });
   }
 
+  // DB write: queue the command; the board picks it up from /api/iot/commands
   const queued = await queuePumpCommand({
     userId: gate,
     gardenId: pot.gardenId,

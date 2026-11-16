@@ -1,8 +1,4 @@
-// TASK: Add a pot together with its plant (both required) in one transaction,
-// seeding the plant's comfort thresholds from the plant catalog when known.
-// Optionally connect a sensor: any of the user's free devices (moved into this
-// garden if needed), or a new one
-// registered here (its one-time key is returned, as in /api/devices).
+// API /api/gardens/[id]/plantings: add a pot + its plant, and maybe a sensor
 import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
@@ -14,14 +10,15 @@ import { nextPotNumber, potCode } from "@/lib/pot-number";
 import { MAX_PORTS, firstFreePort, supportsRemotePorts } from "@/lib/device-pot";
 import { GROWTH_STAGES } from "@/lib/growth-stages";
 
+// A percentage value from 0 to 100
 const percent = z.number().min(0).max(100);
 
+// Validation schema: connect an existing board, or register a new one
 const deviceSchema = z.discriminatedUnion("mode", [
   z.object({
     mode: z.literal("existing"),
     deviceId: z.string().trim().min(1),
-    // Which port of the board waters this pot. Omitted = its first free port.
-    // A port beyond the board's current count adds it (firmware 2.9+).
+    // Board port for this pot (empty = first free; a higher one adds a port).
     port: z.number().int().min(1).max(MAX_PORTS).optional(),
   }),
   z.object({
@@ -34,6 +31,7 @@ const deviceSchema = z.discriminatedUnion("mode", [
   }),
 ]);
 
+// Validation schema: pot, plant and optional device; start must be below stop
 const schema = z
   .object({
     pot: z.object({
@@ -60,7 +58,9 @@ const schema = z
     path: ["pot", "moistureOffThreshold"],
   });
 
+// POST: create the pot and plant together, optionally linking a device
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  // Auth check: only logged-in users
   const gate = await requireUser();
   if (gate instanceof NextResponse) return gate;
   const userId = gate;
@@ -75,11 +75,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (!garden) return NextResponse.json({ error: "Garden not found" }, { status: 404 });
 
   const { pot, plant, device } = parsed.data;
+  // Look up the plant in the catalog for its ideal temperature and humidity
   const profile = findPlantProfile(plant.commonName);
 
   let port = 1;
   // Set when the chosen port is new on the board: its port count grows to this.
   let growTo: number | null = null;
+  // Existing board: check it is the user's and pick a free port on it
   if (device?.mode === "existing") {
     const existing = await prisma.device.findFirst({
       where: { id: device.deviceId, userId },
@@ -129,6 +131,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const newKey = device?.mode === "new" ? generateDeviceKey() : null;
 
   try {
+    // DB write: pot, plant, thresholds and device link all-or-nothing
     const created = await prisma.$transaction(async (tx) => {
       const number = await nextPotNumber(tx, userId);
       const newPot = await tx.pot.create({
@@ -190,6 +193,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     // The plaintext key is returned exactly once — store it on the device.
     return NextResponse.json({ ...created, deviceKey: newKey?.plain ?? null }, { status: 201 });
   } catch (error) {
+    // P2002 = duplicate: hardware ID or pot name already used
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
       const target = String(error.meta?.target ?? "");
       if (target.includes("hardwareId")) {

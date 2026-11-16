@@ -1,6 +1,4 @@
-// TASK: Proposal Feature 4 — Soil & Environmental Recommendations.
-// WHAT: Compares latest readings (+ rain probability) against per-plant
-//       thresholds via buildRecommendations() (rules engine in lib/recommendations.ts).
+// API /api/recommendations: plant care tips from sensors, weather and thresholds
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/api-auth";
 import { prisma } from "@/lib/db";
@@ -8,7 +6,9 @@ import { buildRecommendations } from "@/lib/recommendations";
 import { getLatestEnvironment } from "@/server/readings";
 import { getGardenWeather } from "@/lib/weather";
 
+// GET: compare latest readings with the plant's ideal ranges and give tips
 export async function GET(req: Request) {
+  // Auth check: only logged-in users
   const gate = await requireUser();
   if (gate instanceof NextResponse) return gate;
   const userId = gate;
@@ -30,8 +30,7 @@ export async function GET(req: Request) {
         : Promise.resolve(null),
     ]);
 
-    // Recommendations may use weather, but only after resolving this user's
-    // selected garden. Weather is not used to control pumps in this phase.
+    // Rain chance for the user's own garden (used for tips only, not pumps)
     let rainProb: number | null = null;
     if (gardenId) {
       const garden = await prisma.garden.findFirst({
@@ -51,6 +50,7 @@ export async function GET(req: Request) {
       }
     }
 
+    // Run the rules engine (lib/recommendations.ts)
     const recommendations = buildRecommendations({
       moisture: env.moisture,
       temperature: env.temperature,

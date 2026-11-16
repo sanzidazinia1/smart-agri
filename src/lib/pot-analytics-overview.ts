@@ -1,20 +1,17 @@
-// Analytics for one pot, shaped for charts: soil moisture averaged into
-// ~180 time buckets (so 30 days of 5-second readings stays small), summary
-// numbers, waterings per hour/day, garden weather and a readable activity log.
-// The Excel export still uses the raw rows from getPotAnalytics.
+// Chart data for one pot: moisture over time, totals, waterings, weather and a log
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 
-// Timestamps are stored as UTC in "timestamp without time zone" columns, but a
-// JS Date in $queryRaw is sent as timestamptz — Postgres would then read the
-// column in the session zone (Asia/Dhaka) and shift every comparison by 6 h.
-// Convert parameters to plain UTC timestamps instead.
+// Sends a date to SQL as plain UTC so times aren't shifted by 6 h (Dhaka zone)
 const utc = (date: Date) => Prisma.sql`(${date}::timestamptz AT TIME ZONE 'UTC')`;
 
+// About how many points the moisture chart should have
 const TARGET_POINTS = 180;
 
+// One time slot of averaged moisture readings
 type Bucket = { t: Date; avg: number; min: number; max: number; n: number };
 
+// Builds all chart data for a pot between start and end (null if no such pot)
 export async function getPotAnalyticsOverview(userId: string, gardenId: string, potId: string, start: Date, endParam?: Date) {
   const pot = await prisma.pot.findFirst({
     where: { id: potId, gardenId, userId },
@@ -35,11 +32,12 @@ export async function getPotAnalyticsOverview(userId: string, gardenId: string, 
   const now = new Date();
   const end = endParam && endParam < now ? endParam : now;
   const spanSeconds = Math.max(60, (end.getTime() - start.getTime()) / 1000);
-  // Whole minutes, so buckets line up with clock time.
+  // Whole minutes, so buckets line up with clock time
   const bucketSeconds = Math.max(60, Math.ceil(spanSeconds / TARGET_POINTS / 60) * 60);
   const on = pot.moistureOnThreshold;
   const off = pot.moistureOffThreshold;
 
+  // Run all the database queries at the same time
   const [buckets, statsRows, last, pumpEvents, weather, events] = await Promise.all([
     prisma.$queryRaw<Bucket[]>`
       SELECT date_bin(make_interval(secs => ${bucketSeconds}), "recordedAt", ${utc(start)}) AS t,
@@ -78,8 +76,7 @@ export async function getPotAnalyticsOverview(userId: string, gardenId: string, 
     }),
   ]);
 
-  // Full bucket series with nulls where nothing was recorded, so the chart
-  // shows gaps (sensor off) instead of drawing a line across them.
+  // Fill empty time slots with null so the chart shows gaps when the sensor was off
   const byTime = new Map(buckets.map((bucket) => [new Date(bucket.t).getTime(), bucket]));
   const moisture: { t: string; avg: number | null; min: number | null; max: number | null }[] = [];
   for (let t = start.getTime(); t < end.getTime(); t += bucketSeconds * 1000) {
@@ -92,7 +89,7 @@ export async function getPotAnalyticsOverview(userId: string, gardenId: string, 
     });
   }
 
-  // Waterings: count pump starts and pair them with stops for run time.
+  // Waterings: count pump starts and pair them with stops for run time
   const daily = spanSeconds > 2 * 86_400;
   const wateringBuckets = new Map<string, { count: number; seconds: number }>();
   const bucketKey = (date: Date) => {
@@ -120,6 +117,7 @@ export async function getPotAnalyticsOverview(userId: string, gardenId: string, 
       onAt = null;
     }
   }
+  // One entry per hour (or day) for the waterings chart
   const wateringSeries: { t: string; count: number; seconds: number }[] = [];
   const cursor = new Date(start);
   if (daily) cursor.setHours(0, 0, 0, 0);
@@ -154,10 +152,12 @@ export async function getPotAnalyticsOverview(userId: string, gardenId: string, 
   };
 }
 
+// Rounds to 1 decimal place
 function round(value: number) {
   return Math.round(value * 10) / 10;
 }
 
+// Turns a watering event into a short title and detail for the activity log
 function describeEvent(event: {
   status: string;
   decision: string | null;

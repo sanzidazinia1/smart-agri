@@ -1,9 +1,9 @@
-// Growing guidance for common home/field crops, used to recommend a pot's
-// soil and watering thresholds when a plant is added. Values are general
-// horticultural ranges, not lab-calibrated targets — users can override them.
+// Plant guide: suggested soil, moisture and climate for common plants (editable)
 
+// Soil types a plant can need
 export type SoilType = "loam" | "clay" | "sandy" | "silt" | "peat" | "potting_mix";
 
+// Readable name for each soil type
 export const SOIL_LABELS: Record<SoilType, string> = {
   loam: "Loam",
   clay: "Clay",
@@ -13,18 +13,20 @@ export const SOIL_LABELS: Record<SoilType, string> = {
   potting_mix: "Potting mix",
 };
 
+// Groups used to sort the plant guide
 export type PlantCategory = "Vegetable" | "Herb" | "Fruit" | "Flower" | "Indoor";
 
+// Growing guidance for one plant
 export interface PlantProfile {
   name: string;
   category: PlantCategory;
-  /** Other names people search by, e.g. "Brinjal" for eggplant. */
+  // Other names people search by, e.g. "Brinjal" for eggplant
   aliases?: string[];
   scientificName: string;
   soil: SoilType;
   soilNote: string;
   ph: [number, number];
-  /** Soil moisture comfort band (%): water below the first, stop at the second. */
+  // Moisture range (%): water below the first, stop at the second
   moisture: [number, number];
   tempC: [number, number];
   humidity: [number, number];
@@ -32,6 +34,7 @@ export interface PlantProfile {
   tip: string;
 }
 
+// All plants in the guide
 export const PLANT_CATALOG: PlantProfile[] = [
   { name: "Tomato", category: "Vegetable", scientificName: "Solanum lycopersicum", soil: "loam", soilNote: "Rich, well-drained loam with compost", ph: [6.0, 6.8], moisture: [40, 70], tempC: [18, 30], humidity: [50, 70], sunlight: "Full sun, 6–8 h", tip: "Water at the base; wet leaves invite early and late blight." },
   { name: "Chili", category: "Vegetable", aliases: ["Chilli", "Pepper", "Capsicum", "Morich"], scientificName: "Capsicum annuum", soil: "loam", soilNote: "Well-drained loam, not waterlogged", ph: [6.0, 7.0], moisture: [40, 65], tempC: [20, 30], humidity: [50, 70], sunlight: "Full sun, 6–8 h", tip: "Let the top few cm dry between waterings." },
@@ -134,11 +137,12 @@ export const PLANT_CATALOG: PlantProfile[] = [
   { name: "Song of India", category: "Indoor", aliases: ["Dracaena reflexa"], scientificName: "Dracaena reflexa", soil: "potting_mix", soilNote: "Well-draining potting mix", ph: [6.0, 7.0], moisture: [30, 55], tempC: [18, 32], humidity: [40, 70], sunlight: "Bright indirect light", tip: "Let the top half of the soil dry between waterings." },
 ];
 
+// Lowercases and tidies spaces so names compare fairly
 function normalize(value: string) {
   return value.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
-/** Find a catalog entry by name or alias (case-insensitive). */
+// Finds a plant in the guide by name or other name (any case)
 export function findPlantProfile(name: string): PlantProfile | undefined {
   const needle = normalize(name);
   if (!needle) return undefined;
@@ -147,7 +151,7 @@ export function findPlantProfile(name: string): PlantProfile | undefined {
   );
 }
 
-/** Same-plant check used for "you already grow N of these" counts. */
+// True if two names mean the same plant (for "you already grow N" counts)
 export function isSamePlant(a: string, b: string) {
   const profile = findPlantProfile(a);
   if (profile) return findPlantProfile(b) === profile;

@@ -1,55 +1,54 @@
-// Device pairing ("claim") helpers. A board without a key announces itself
-// with its hardware ID, a random secret and a 6-digit pairing code it shows
-// the user. The user claims it in the app by typing that code; the board then
-// collects its device key once. See /api/iot/pair and /api/devices/pairing.
+// Helpers for pairing a new board to the app with a 6-digit code
 import crypto from "node:crypto";
 
-/**
- * Boards waiting to be added check in every few seconds (4 s, or 1 s while
- * confirming). If one has been silent this long it's switched off or lost
- * Wi-Fi, so it's hidden from "New devices found" and can't be claimed.
- */
+// A waiting board silent this long is hidden from "New devices found"
 export const PAIRING_VISIBLE_MS = 30 * 1000;
-/** A claimed board must collect its key within this window. */
+// A claimed board must collect its key within this time
 export const KEY_DELIVERY_TTL_MS = 15 * 60 * 1000;
-/** Wrong codes allowed before the user must press "new code" on the board. */
+// Wrong codes allowed before the user must press "new code" on the board
 export const MAX_FAILED_ATTEMPTS = 5;
-/** How long the board waits for its BOOT button after the app asks. */
+// How long the board waits for its BOOT button after the app asks
 export const CONFIRM_WINDOW_MS = 30 * 1000;
 
+// Allowed formats for hardware ID, pairing code and board secret
 const HARDWARE_ID = /^[A-Za-z0-9_-]{3,64}$/;
 const PAIRING_CODE = /^\d{6}$/;
 const SECRET = /^[A-Za-z0-9]{16,128}$/;
 
+// True if the hardware ID has a valid format
 export function isValidHardwareId(value: string) {
   return HARDWARE_ID.test(value);
 }
 
+// True if the board's secret has a valid format
 export function isValidSecret(value: string) {
   return SECRET.test(value);
 }
 
-/** Accepts "482 913", "482-913" etc.; returns the 6 digits or null. */
+// Accepts "482 913", "482-913" etc.; returns the 6 digits or null
 export function normalizePairingCode(input: string) {
   const digits = input.replace(/\D/g, "");
   return PAIRING_CODE.test(digits) ? digits : null;
 }
 
+// Hashes the board's secret with SHA-256 so it isn't stored in plain text
 export function hashPairingSecret(secret: string) {
   return crypto.createHash("sha256").update(secret).digest("hex");
 }
 
-/** Constant-time comparison so codes can't be guessed by timing. */
+// Compares codes in constant time so they can't be guessed by timing
 export function pairingCodesMatch(expected: string, provided: string) {
   const a = Buffer.from(expected);
   const b = Buffer.from(provided);
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
+// True if the waiting board checked in recently enough to show
 export function isPairingVisible(lastSeenAt: Date, now = new Date()) {
   return now.getTime() - lastSeenAt.getTime() <= PAIRING_VISIBLE_MS;
 }
 
+// Saved pairing info for a board
 export type PairingState = {
   secretHash: string;
   claimedAt: Date | null;
@@ -57,12 +56,7 @@ export type PairingState = {
   keyExpiresAt: Date | null;
 };
 
-/**
- * What to do when a board announces itself:
- *  - "reset":   new secret (board restarted unpaired) — forget any old claim.
- *  - "deliver": it was claimed and its key is ready — hand it over once.
- *  - "wait":    keep waiting for the user to claim it.
- */
+// When a board checks in: "reset" (start over), "deliver" (give key) or "wait"
 export function announceAction(existing: PairingState | null, secretHash: string, now = new Date()) {
   if (!existing || existing.secretHash !== secretHash) return "reset" as const;
   if (existing.claimedAt && existing.pendingKey && existing.keyExpiresAt && existing.keyExpiresAt > now) {
@@ -72,7 +66,7 @@ export function announceAction(existing: PairingState | null, secretHash: string
   return "wait" as const;
 }
 
-/** The app asked the user to press the board's button, and it's not too late. */
+// True if the app asked for a button press and it's not too late
 export function isConfirmPending(confirmRequestedAt: Date | null, now = new Date()) {
   return Boolean(confirmRequestedAt && now.getTime() - confirmRequestedAt.getTime() <= CONFIRM_WINDOW_MS);
 }

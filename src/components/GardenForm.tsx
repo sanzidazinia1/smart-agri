@@ -1,7 +1,6 @@
 "use client";
 
-// Garden model, type metadata and the create/edit form fields, shared by the
-// Gardens list and the garden details page.
+// Garden types, helpers and the create/edit form fields used by garden pages
 import {
   useCallback,
   useEffect,
@@ -24,6 +23,7 @@ import {
 import { Input } from "@/components/Input";
 import { useDismiss } from "@/components/HeaderMenus";
 
+// A garden as returned by the API
 export interface Garden {
   id: string;
   name: string;
@@ -36,6 +36,7 @@ export interface Garden {
   _count: { pots: number; plants: number; devices: number };
 }
 
+// Garden form values (kept as text while the user types)
 export interface GardenForm {
   name: string;
   type: string;
@@ -44,6 +45,7 @@ export interface GardenForm {
   lng: string;
 }
 
+// One alert shown on a garden card
 export interface GardenCardAlert {
   id: string;
   severity: "critical" | "warning" | "info";
@@ -52,6 +54,7 @@ export interface GardenCardAlert {
   potId?: string;
 }
 
+// Live summary for a garden card: devices, pumps and alerts
 export interface GardenOverview {
   id: string;
   deviceSummary: { online: number; stale?: number; offline: number };
@@ -60,6 +63,7 @@ export interface GardenOverview {
   alerts?: GardenCardAlert[];
 }
 
+// Blank values for a new garden form
 export const emptyForm: GardenForm = {
   name: "",
   type: "outdoor",
@@ -68,6 +72,7 @@ export const emptyForm: GardenForm = {
   lng: "",
 };
 
+// Label, icon and colour for each garden type
 export const GARDEN_TYPES: Record<string, { label: string; icon: LucideIcon; iconClass: string }> = {
   outdoor: {
     label: "Outdoor",
@@ -91,10 +96,12 @@ export const GARDEN_TYPES: Record<string, { label: string; icon: LucideIcon; ico
   },
 };
 
+// Get the info for a garden type (outdoor if unknown)
 export function gardenType(type: string) {
   return GARDEN_TYPES[type] ?? GARDEN_TYPES.outdoor;
 }
 
+// Turn form text into the data sent to the API
 export function parseGardenForm(form: GardenForm) {
   return {
     name: form.name,
@@ -111,6 +118,7 @@ const LocationPicker = dynamic(() => import("@/components/LocationPicker"), {
   loading: () => <div className="h-56 animate-pulse rounded-xl bg-slate-100 dark:bg-slate-800" />,
 });
 
+// One place found by the location search
 interface PlaceResult {
   label: string;
   detail: string;
@@ -118,12 +126,14 @@ interface PlaceResult {
   lng: number;
 }
 
+// Read a coordinate from text; null if empty or out of range
 function parseCoordinate(value: string, limit: number) {
   if (value.trim() === "") return null;
   const number = Number(value);
   return Number.isFinite(number) && Math.abs(number) <= limit ? number : null;
 }
 
+// Form fields for a garden: name, type, place search, map and coordinates
 export function GardenFields({
   value,
   onChange,
@@ -133,24 +143,25 @@ export function GardenFields({
   onChange: Dispatch<SetStateAction<GardenForm>>;
   withPlaceholders?: boolean;
 }) {
+  // GPS, place-search and dropdown state
   const [locating, setLocating] = useState(false);
   const [locateError, setLocateError] = useState("");
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<{ q: string; items: PlaceResult[]; failed?: boolean }>({ q: "", items: [] });
   const [searchOpen, setSearchOpen] = useState(false);
-  // The last area name we filled in automatically, so a user-typed name is
-  // never overwritten but our own suggestion keeps following the pin.
+  // Last area name we filled in, so we never overwrite a name the user typed
   const autoLocation = useRef("");
+  // Refs and close-on-outside-click for the search dropdown
   const searchRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const closeSearch = useCallback(() => setSearchOpen(false), []);
   useDismiss(searchOpen, closeSearch, searchRef, searchInputRef);
 
+  // Parsed coordinates and current search text
   const lat = parseCoordinate(value.lat, 90);
   const lng = parseCoordinate(value.lng, 180);
   const trimmedQuery = query.trim();
-  // Bias search towards the current pin, or Dhaka before one is set. Rounded
-  // so small pin moves don't re-run the search.
+  // Bias search toward the pin (or Dhaka); rounded so small moves don't re-search
   const near = lat != null && lng != null ? `${lat.toFixed(1)},${lng.toFixed(1)}` : "23.8,90.4";
   const searching = trimmedQuery.length >= 3 && results.q !== trimmedQuery;
   const visibleResults = results.q === trimmedQuery ? results.items : [];
@@ -176,6 +187,7 @@ export function GardenFields({
     };
   }, [trimmedQuery, near]);
 
+  // Fill the area name unless the user typed their own
   function applyAreaName(label: string | null) {
     if (!label) return;
     const previousAuto = autoLocation.current;
@@ -185,6 +197,7 @@ export function GardenFields({
     );
   }
 
+  // Set the pin; look up the area name if we don't have one
   function setPoint(nextLat: number, nextLng: number, areaName?: string) {
     onChange((form) => ({ ...form, lat: String(nextLat), lng: String(nextLng) }));
     if (areaName) {
@@ -197,6 +210,7 @@ export function GardenFields({
       .catch(() => undefined);
   }
 
+  // Use the browser's GPS to fill in the location
   function fillMyLocation() {
     if (!navigator.geolocation) {
       setLocateError("Location is not available in this browser.");
@@ -217,6 +231,7 @@ export function GardenFields({
     );
   }
 
+  // Use a place picked from the search results
   function choosePlace(place: PlaceResult) {
     setPoint(Number(place.lat.toFixed(6)), Number(place.lng.toFixed(6)), place.label);
     setQuery("");
@@ -225,6 +240,7 @@ export function GardenFields({
 
   return (
     <div className="space-y-4">
+      {/* Name and type */}
       <Input
         label="Name"
         value={value.name}
@@ -270,6 +286,7 @@ export function GardenFields({
               <Loader2 size={15} className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-slate-400" />
             ) : null}
           </label>
+          {/* Search results dropdown */}
           {searchOpen && trimmedQuery.length >= 3 && !searching ? (
             <ul
               role="listbox"
@@ -304,6 +321,7 @@ export function GardenFields({
           ) : null}
         </div>
 
+        {/* Map: click or drag the pin to set the location */}
         <LocationPicker
           lat={lat}
           lng={lng}
@@ -313,6 +331,7 @@ export function GardenFields({
         />
         {locateError ? <p className="text-xs font-bold text-amber-600">{locateError}</p> : null}
 
+        {/* Latitude and longitude boxes */}
         <div className="grid grid-cols-2 gap-3">
           <Input
             label="Latitude"
@@ -333,6 +352,7 @@ export function GardenFields({
             required
           />
         </div>
+        {/* Area name, filled in automatically from the pin */}
         <Input
           label="Area name"
           value={value.location}
@@ -344,6 +364,7 @@ export function GardenFields({
   );
 }
 
+// Dropdown for choosing the garden type
 function SelectField({
   label,
   value,
@@ -371,6 +392,7 @@ function SelectField({
   );
 }
 
+// Turn a saved garden into form values for editing
 export function gardenToForm(garden: Garden): GardenForm {
   return {
     name: garden.name,

@@ -1,23 +1,4 @@
-/*
- * SmartAgri ESP32 node — one soil probe and one pump relay per board.
- *
- * Nothing secret is compiled in:
- *  1. First boot (or hold BOOT for 3 s at any time): the board opens a Wi-Fi
- *     network "SmartAgri-Setup". Connect from a phone, pick your Wi-Fi and
- *     enter the SmartAgri server address (e.g. http://192.168.1.10:3000).
- *  2. It announces itself to the server; its blue LED blinks slowly.
- *  3. In the app: Devices -> Add device (or "New devices found") -> choose the
- *     pot. The LED then flashes fast: press BOOT once to confirm. The board
- *     receives its device key automatically. (Typing the 6-digit pairing
- *     code shown on the setup page / Serial Monitor works too; the code stays
- *     the same across restarts until the board is claimed.)
- * The server decides which pot this board serves, so moving it to another pot
- * in the app needs no re-flashing. If the key is ever rejected (device deleted
- * in the app), the board goes back to step 2 by itself.
- *
- * Libraries: WiFiManager (tzapu) 2.x, ArduinoJson 7.x. Board: ESP32 Dev Module.
- * Optional per-board calibration lives in config.h (see config.example.h).
- */
+// ESP32 firmware: reads soil probes, sends readings, and runs pumps on command.
 
 #include <WiFi.h>
 #include <HTTPClient.h>
@@ -29,12 +10,13 @@
 #include <esp_mac.h>
 #include <esp_sleep.h>
 #include <driver/gpio.h>
+// Load this board's own settings and HTTPS certificates if config.h exists
 #if __has_include("config.h")
 #include "config.h"
 #include "root_ca.h"
 #endif
 
-// --- Hardware / calibration defaults (override in config.h) ----------------
+// ---- Hardware / calibration defaults (config.h can override) ----
 #ifndef SOIL_RAW_DRY
 #define SOIL_RAW_DRY 3200  // analogRead() with the probe in dry air/soil
 #endif
@@ -45,7 +27,7 @@
 #define RELAY_ON_LEVEL HIGH  // pin level that switches the pump ON
 #endif
 #ifndef RELAY_OFF_LEVEL
-#define RELAY_OFF_LEVEL LOW
+#define RELAY_OFF_LEVEL LOW  // pin level that switches the pump OFF
 #endif
 #ifndef DEFAULT_SERVER_URL
 #define DEFAULT_SERVER_URL ""  // e.g. "https://your-app.vercel.app" — pre-fills the setup page
@@ -53,40 +35,36 @@
 #ifndef HTTP_TIMEOUT_MS
 #define HTTP_TIMEOUT_MS 10000  // HTTPS handshakes to a hosted server take longer
 #endif
-// How often the board reports soil moisture and asks for pump commands. Kept
-// modest so one board stays well inside a free Vercel plan (~13k requests/day).
-// Override in config.h, e.g. for faster readings on a local server.
+// Regular report interval; kept modest to stay inside the free Vercel plan
 #ifndef TELEMETRY_INTERVAL_MS
 #define TELEMETRY_INTERVAL_MS 20000UL
 #endif
-// Between those reports the probes are checked every SAMPLE_INTERVAL_MS, and a
-// change of REPORT_CHANGE_PERCENT or more (or a probe / pump changing state) is
-// reported straight away — at most once per MIN_REPORT_GAP_MS. Readings show up
-// in the app within a few seconds while the request count stays low.
+// Probes are checked this often between regular reports
 #ifndef SAMPLE_INTERVAL_MS
 #define SAMPLE_INTERVAL_MS 2000UL
 #endif
+// A moisture change this big (in %) is reported straight away
 #ifndef REPORT_CHANGE_PERCENT
 #define REPORT_CHANGE_PERCENT 2
 #endif
+// Shortest gap allowed between two early reports
 #ifndef MIN_REPORT_GAP_MS
 #define MIN_REPORT_GAP_MS 3000UL
 #endif
+// How often the board asks the server for pump commands
 #ifndef COMMAND_POLL_INTERVAL_MS
 #define COMMAND_POLL_INTERVAL_MS 10000UL
 #endif
+// Safety: pumps switch off if the server is silent this long
 #ifndef COMMUNICATION_LOSS_FAILSAFE_MS
 #define COMMUNICATION_LOSS_FAILSAFE_MS 60000UL
 #endif
 
+// Firmware version sent to the server, and the setup Wi-Fi name
 #define FIRMWARE_VERSION "smartagri-2.11"
 #define SETUP_AP_NAME "SmartAgri-Setup"
 
-// Ports: each pot this board serves gets a soil probe + a pump relay.
-// Probes must be on ADC1 pins (36, 39, 34, 35, 32, 33) — ADC2 stops working
-// while Wi-Fi is on — so one board serves at most 6 pots. PORT_COUNT is only
-// the starting number: add or remove ports in the app (Devices → + Add port),
-// firmware 2.9+ applies it by itself. Pins can be changed in config.h.
+// ---- Ports: one soil probe + one pump relay per pot (max 6, ADC1 pins only) ----
 #ifndef PORT_COUNT
 #define PORT_COUNT 1
 #endif
@@ -103,16 +81,17 @@ const int RELAY_PIN_LIST[MAX_PORTS] = RELAY_PINS;
 const int SETUP_BUTTON_PIN = 0;    // the board's BOOT button
 const int LED_PIN = 2;     // on-board LED: blinks while waiting to be claimed
 
+// ---- Pairing timings ----
 const unsigned long PAIR_INTERVAL_MS = 2000;
 const unsigned long CONFIRM_POLL_INTERVAL_MS = 1000;
-// A BOOT press counts as "yes, add me" for this long, so it works whether it
-// happens just before or just after the app asks.
+// How long a BOOT press still counts as "yes, add me"
 const unsigned long PRESS_LATCH_MS = 15000;
-const unsigned long SETUP_HOLD_MS = 3000;
+const unsigned long SETUP_HOLD_MS = 3000;  // hold BOOT this long to reopen setup
 
 Preferences config;        // "cfg": server URL and device key
 Preferences commandStore;  // "pumpcmd": de-duplication of pump commands
 
+// ---- Board state kept in memory ----
 String hardwareId;
 String serverUrl;
 String deviceKey;
@@ -120,14 +99,11 @@ String pairSecret;
 String pairCode;
 
 bool pumpOn[MAX_PORTS] = {false};  // index = port - 1
-// Ports in use. Starts at PORT_COUNT; the app can change it (Devices → + Add
-// port) — the board then saves it and sets up the new relay pin, no re-flash.
-int portCount = PORT_COUNT;
-// What the last report said per port (-1 = probe not reading), and whether
-// something changed that should be reported right away.
+int portCount = PORT_COUNT;  // ports in use; the app can change this
+// Last reported % per port (-1 = no probe reading)
 int reportedPercent[MAX_PORTS] = {-2, -2, -2, -2, -2, -2};
 int probeStreak[MAX_PORTS] = {0};  // good probe readings in a row, per port
-bool reportNow = false;
+bool reportNow = false;  // something changed: send a report right away
 unsigned long lastSampleAt = 0;
 unsigned long lastTelemetryAt = 0;
 unsigned long lastCommandPollAt = 0;
@@ -139,13 +115,10 @@ unsigned long confirmUntil = 0;  // the app is waiting for a BOOT press
 unsigned long pressLatchedUntil = 0;
 bool bootWasDown = false;
 
-// ---------------------------------------------------------------------------
-// Identity and pairing
-// ---------------------------------------------------------------------------
+// ---- Identity and pairing ----
 
+// Builds a unique board ID from the chip's MAC, e.g. ESP32-D299AC
 String makeHardwareId() {
-  // Unique per board, from the factory MAC burned into the chip (readable
-  // before Wi-Fi starts): e.g. ESP32-D299AC.
   uint8_t mac[6];
   esp_read_mac(mac, ESP_MAC_WIFI_STA);
   char id[16];
@@ -153,13 +126,13 @@ String makeHardwareId() {
   return String(id);
 }
 
+// Shows the pairing code as "123 456"
 String formattedCode() {
   return pairCode.substring(0, 3) + " " + pairCode.substring(3);
 }
 
+// Makes a new pairing secret + code and saves them so restarts keep them
 void newPairingIdentity() {
-  // A fresh secret + code, kept in flash until the board is claimed so the
-  // code doesn't change when the board restarts.
   char secret[33];
   for (int i = 0; i < 16; i++) sprintf(secret + i * 2, "%02x", (uint8_t)(esp_random() & 0xFF));
   pairSecret = String(secret);
@@ -170,12 +143,14 @@ void newPairingIdentity() {
   config.putString("pairCode", pairCode);
 }
 
+// Loads the saved pairing secret + code, or makes new ones
 void loadPairingIdentity() {
   pairSecret = config.getString("pairSecret", "");
   pairCode = config.getString("pairCode", "");
   if (pairSecret.length() != 32 || pairCode.length() != 6) newPairingIdentity();
 }
 
+// Prints pairing instructions to the Serial Monitor
 void printPairingHelp() {
   Serial.println();
   Serial.println("==============================================");
@@ -185,6 +160,7 @@ void printPairingHelp() {
   Serial.println("==============================================");
 }
 
+// Drops a rejected device key and starts pairing again
 void forgetKey(const char *reason) {
   Serial.printf("Device key rejected (%s) - pairing again.\n", reason);
   deviceKey = "";
@@ -194,10 +170,9 @@ void forgetKey(const char *reason) {
   printPairingHelp();
 }
 
-// ---------------------------------------------------------------------------
-// Wi-Fi + server address setup page
-// ---------------------------------------------------------------------------
+// ---- Wi-Fi + server address setup page ----
 
+// Cleans up and saves the server address typed on the setup page
 void saveServerUrl(String value) {
   value.trim();
   if (!value.length()) return;
@@ -213,7 +188,7 @@ static const char PORTAL_STYLE[] PROGMEM =
   "body{background:#0b1220;color:#e2e8f0;font-family:-apple-system,system-ui,Segoe UI,Roboto,sans-serif;margin:0}"
   ".wrap{max-width:440px;padding:14px 16px 24px;text-align:left}"
   "h1{color:#34d399;font-size:1.4em;margin:.2em 0}h3{color:#94a3b8;font-weight:500;margin:0 0 .8em}br{display:none}"
-  // Network list: compact rows with CSS signal bars (the stock icons look poor on dark).
+  // Network list: compact rows with CSS signal bars
   "div:has(>a[data-ssid]){display:flex;align-items:center;justify-content:space-between;background:#111827;"
   "border:1px solid #1f2937;border-top:0;padding:0 14px;margin:0}"
   "div:has(>a[data-ssid]):first-of-type{border-top:1px solid #1f2937;border-radius:12px 12px 0 0}"
@@ -242,6 +217,7 @@ static const char PORTAL_STYLE[] PROGMEM =
   "details{margin:12px 0 0}summary{color:#94a3b8;font-size:13px;cursor:pointer}.msg{border-radius:12px}"
   "</style>";
 
+// Connects to Wi-Fi, or opens the setup page when needed or forced
 void runWiFiSetup(bool forcePortal) {
   WiFiManager wm;
   wm.setConfigPortalTimeout(300);  // 5 minutes, then restart and try again
@@ -258,13 +234,13 @@ void runWiFiSetup(bool forcePortal) {
 
   if (!serverUrl.length() && strlen(DEFAULT_SERVER_URL)) serverUrl = DEFAULT_SERVER_URL;
 
+  // Extra HTML on the setup page: pairing code, or "already added"
   String info;
   if (!deviceKey.length()) {
     info += "<div class='tip'>Pairing code <span class='code'>" + formattedCode() + "</span>"
             "<span class='next'>After <b>Save</b>: SmartAgri → <b>Sensors → Add device</b>, then press <b>BOOT</b> on the board.</span>"
             "<a class='btn' id='sa' href='#' style='display:none'>Open SmartAgri</a></div>"
-            // After Save the phone returns to home Wi-Fi; this button then opens
-            // the app's Add device guide for this board.
+            // Button that opens the app's Add device guide for this board
             "<script>function sa(){var s=document.getElementById('server');var a=document.getElementById('sa');"
             "if(!s||!a)return;var v=s.value.trim().replace(/\\/+$/,'');if(v&&v.indexOf('http')!==0)v='http://'+v;"
             "a.href=v+'/sensors?claim=" + hardwareId + "&code=" + pairCode + "';a.style.display=v?'block':'none';}"
@@ -272,11 +248,11 @@ void runWiFiSetup(bool forcePortal) {
   } else {
     info += "<div class='tip'>Sensor " + hardwareId + " is already in your SmartAgri account.</div>";
   }
-  // The app's "Add device" QR opens /wifi?server=<address>: fill it in for the user.
+  // Fills in the server address from the app's QR link (?server=...)
   info += "<script>(function(){var q=new URLSearchParams(location.search).get('server');if(!q)return;"
           "function f(){var s=document.getElementById('server');if(s){s.value=q;if(window.sa)sa();}}"
           "document.addEventListener('DOMContentLoaded',f);setTimeout(f,200);})();</script>";
-  // Server address: pre-filled, so it's tucked away unless it's still empty.
+  // Server address box: folded away unless it's still empty
   String advancedOpen = serverUrl.length() ? "<details>" : "<details open>";
   advancedOpen += "<summary>Server address</summary>";
   WiFiManagerParameter infoParam(info.c_str());
@@ -288,6 +264,7 @@ void runWiFiSetup(bool forcePortal) {
   wm.addParameter(&serverParam);
   wm.addParameter(&advancedEnd);
 
+  // Open the setup page, or just join the saved Wi-Fi
   bool needPortal = forcePortal || !serverUrl.length();
   Serial.println(needPortal ? "Opening Wi-Fi setup: connect to \"" SETUP_AP_NAME "\" from your phone."
                             : "Connecting to saved Wi-Fi...");
@@ -303,7 +280,7 @@ void runWiFiSetup(bool forcePortal) {
   syncClock();
 }
 
-// Certificate checks need the real date; the ESP32 starts at 1970.
+// Gets the real time from the internet (needed for HTTPS certificate checks)
 void syncClock() {
   configTime(0, 0, "pool.ntp.org", "time.google.com");
   const unsigned long startedAt = millis();
@@ -311,16 +288,14 @@ void syncClock() {
   Serial.println(time(nullptr) >= 1700000000 ? "Clock synced." : "Clock not synced yet - HTTPS may fail until it is.");
 }
 
-// ---------------------------------------------------------------------------
-// HTTP helpers
-// ---------------------------------------------------------------------------
+// ---- HTTP helpers ----
 
+// Sends one GET/POST to the server; returns the HTTP status code (-1 = offline)
 int request(const char *method, const String &path, const String &body, String *response, bool authenticated) {
   if (!serverUrl.length() || WiFi.status() != WL_CONNECTED) return -1;
   HTTPClient http;
   http.setTimeout(HTTP_TIMEOUT_MS);
-  // https:// (e.g. Vercel): the server's certificate is verified against the
-  // root authorities in root_ca.h. http:// is for a server on your own network.
+  // https is checked against root_ca.h; plain http is for a local server
   static WiFiClientSecure secureClient;
   static WiFiClient plainClient;
   if (serverUrl.startsWith("https://")) {
@@ -338,10 +313,9 @@ int request(const char *method, const String &path, const String &body, String *
   return code;
 }
 
-// ---------------------------------------------------------------------------
-// Pump
-// ---------------------------------------------------------------------------
+// ---- Pump ----
 
+// Turns the pump on/off for one port
 void setPump(int port, bool on) {
   if (port < 1 || port > portCount) return;
   digitalWrite(RELAY_PIN_LIST[port - 1], on ? RELAY_ON_LEVEL : RELAY_OFF_LEVEL);
@@ -350,6 +324,7 @@ void setPump(int port, bool on) {
   Serial.printf("Port %d pump %s\n", port, on ? "ON" : "OFF");
 }
 
+// Switches every pump off (safety)
 void allPumpsOff() {
   for (int port = 1; port <= portCount; port++) {
     digitalWrite(RELAY_PIN_LIST[port - 1], RELAY_OFF_LEVEL);
@@ -357,11 +332,13 @@ void allPumpsOff() {
   }
 }
 
+// True if at least one pump is running
 bool anyPumpOn() {
   for (int i = 0; i < portCount; i++) if (pumpOn[i]) return true;
   return false;
 }
 
+// Finds a command we already ran (last 8 kept), or -1
 int savedCommandSlot(const char *commandId) {
   for (int slot = 0; slot < 8; slot++) {
     if (commandStore.getString((String("id") + slot).c_str()) == commandId) return slot;
@@ -369,6 +346,7 @@ int savedCommandSlot(const char *commandId) {
   return -1;
 }
 
+// Remembers a command's result so a repeat isn't run twice
 void saveCommandResult(const char *commandId, bool success) {
   int slot = commandStore.getUInt("nextSlot", 0) % 8;
   commandStore.putString((String("id") + slot).c_str(), commandId);
@@ -376,6 +354,7 @@ void saveCommandResult(const char *commandId, bool success) {
   commandStore.putUInt("nextSlot", (slot + 1) % 8);
 }
 
+// Tells the server a command was received or carried out
 void acknowledgeCommand(const char *commandId, const char *kind, bool success = true, const char *error = nullptr) {
   JsonDocument body;
   body["hardwareId"] = hardwareId;
@@ -390,11 +369,9 @@ void acknowledgeCommand(const char *commandId, const char *kind, bool success = 
   else if (code < 200 || code >= 300) Serial.printf("Command acknowledgement failed: %d\n", code);
 }
 
-// ---------------------------------------------------------------------------
-// Remote actions from the app: restart, reset Wi-Fi, sleep ("turn off"),
-// factory reset. Confirmed to the server first, then carried out.
-// ---------------------------------------------------------------------------
+// ---- Remote actions from the app (restart, reset Wi-Fi, sleep, factory reset) ----
 
+// Tells the server we got the action; true if it heard us
 bool confirmAction(const char *action) {
   JsonDocument body;
   body["hardwareId"] = hardwareId;
@@ -407,6 +384,7 @@ bool confirmAction(const char *action) {
   return code >= 200 && code < 300;
 }
 
+// Carries out a remote action after switching all pumps off
 void runAction(const String &action) {
   if (!confirmAction(action.c_str())) return;  // retried on the next poll
   allPumpsOff();
@@ -442,8 +420,7 @@ void runAction(const String &action) {
   }
 }
 
-// Switch to n ports (1-6), as chosen in the app. New relay pins start OFF;
-// removed ports have their pump switched off.
+// Changes the number of ports (1-6) as chosen in the app; pumps start OFF
 void setPortCount(int n) {
   if (n < 1 || n > MAX_PORTS || n == portCount) return;
   for (int i = n; i < portCount; i++) {
@@ -462,6 +439,7 @@ void setPortCount(int n) {
   reportNow = true;
 }
 
+// Asks the server for new commands and runs them
 void processPendingCommands() {
   String response;
   int code = request("GET", "/api/iot/commands?deviceId=" + hardwareId, "", &response, true);
@@ -495,6 +473,7 @@ void processPendingCommands() {
     acknowledgeCommand(commandId, "delivery");
     if (!deviceKey.length()) return;  // key was rejected mid-way
 
+    // Already ran this command: just report the old result again
     int previousSlot = savedCommandSlot(commandId);
     if (previousSlot >= 0) {
       bool priorSuccess = commandStore.getBool((String("ok") + previousSlot).c_str(), false);
@@ -502,14 +481,14 @@ void processPendingCommands() {
       continue;
     }
 
-    // Sequences are numbered per pot, and each port serves one pot. When the
-    // pot on a port changes, that port starts a fresh sequence.
+    // Command numbers count per pot; a new pot on this port restarts the count
     String seqPotKey = String("seqPot") + port, seqKey = String("hiSeq") + port;
     if (commandStore.getString(seqPotKey.c_str(), "") != potId) {
       commandStore.putString(seqPotKey.c_str(), potId);
       commandStore.putLong(seqKey.c_str(), 0);
     }
 
+    // Safety checks: reject bad ports and old (out-of-order) commands
     if (port < 1 || port > portCount) {
       saveCommandResult(commandId, false);
       acknowledgeCommand(commandId, "execution", false, "This board has no such port");
@@ -529,13 +508,9 @@ void processPendingCommands() {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Telemetry
-// ---------------------------------------------------------------------------
+// ---- Telemetry (soil readings) ----
 
-// Median of several samples: ignores one-off spikes (e.g. when the relay or
-// pump switches) that would otherwise flip automatic watering on and off.
-// *spread = how far the middle samples are apart (a floating pin jumps around).
+// Reads the probe 15 times and returns the middle value (ignores spikes)
 int readSoilRaw(int pin, int *spread = nullptr) {
   const int n = 15;
   int samples[n];
@@ -543,6 +518,7 @@ int readSoilRaw(int pin, int *spread = nullptr) {
     samples[i] = analogRead(pin);
     delay(4);
   }
+  // Sort the samples (insertion sort) to find the middle one
   for (int i = 1; i < n; i++) {
     int v = samples[i], j = i - 1;
     while (j >= 0 && samples[j] > v) { samples[j + 1] = samples[j]; j--; }
@@ -552,35 +528,33 @@ int readSoilRaw(int pin, int *spread = nullptr) {
   return samples[n / 2];
 }
 
-// A disconnected signal wire reads ~0, a disconnected ground ~4095, and an
-// empty (floating) pin drifts around near 0. None of that is soil: a real
-// probe reads between its in-water and in-dry-air values (SOIL_RAW_WET /
-// SOIL_RAW_DRY), give or take PROBE_RAW_MARGIN. Outside that = "no probe".
+// Allowed slack around the wet/dry calibration values
 #ifndef PROBE_RAW_MARGIN
 #define PROBE_RAW_MARGIN 500
 #endif
+// True if a raw value looks like real soil (not a loose or missing wire)
 bool soilRawLooksValid(int raw) {
   const int wetEnd = min(SOIL_RAW_WET, SOIL_RAW_DRY) - PROBE_RAW_MARGIN;
   const int dryEnd = max(SOIL_RAW_WET, SOIL_RAW_DRY) + PROBE_RAW_MARGIN;
   return raw > 50 && raw < 4080 && raw >= wetEnd && raw <= dryEnd;
 }
 
+// Converts a raw probe value to moisture 0-100%
 int moisturePercent(int raw) {
   int percentage = map(raw, SOIL_RAW_DRY, SOIL_RAW_WET, 0, 100);
   return constrain(percentage, 0, 100);
 }
 
-// An input with nothing wired "floats" and can drift into a believable value
-// (e.g. a fake 100%). A real probe drives the pin: steady readings, and it
-// holds up against the pin's built-in pull-down (GPIO 32/33 have one; 34-39
-// don't). Anything else counts as "no probe".
+// Max jumpiness of a real probe's readings (empty pins drift around)
 #ifndef PROBE_NOISE_LIMIT
 #define PROBE_NOISE_LIMIT 250  // raw ADC units between the middle samples
 #endif
 const int PROBE_STREAK_NEEDED = 3;  // good readings in a row before it counts
 
+// True if a real probe seems connected (steady, sensible readings)
 bool probeAttached(int pin, int raw, int spread) {
   if (!soilRawLooksValid(raw) || spread > PROBE_NOISE_LIMIT) return false;
+  // GPIO 32/33: an empty pin collapses when the pull-down is switched on
   if (pin == 32 || pin == 33) {
     pinMode(pin, INPUT_PULLDOWN);
     delay(2);
@@ -592,9 +566,7 @@ bool probeAttached(int pin, int raw, int spread) {
   return true;
 }
 
-// This port's moisture %, or -1 when no probe is reading. A probe must read
-// well PROBE_STREAK_NEEDED times in a row (~4 s) before it's reported, so one
-// lucky noisy reading never shows up as a real value.
+// Moisture % for a port, or -1 until the probe reads well 3 times in a row
 int readProbe(int port, int *rawOut = nullptr) {
   int pin = SOIL_PIN_LIST[port - 1], spread = 0;
   int raw = readSoilRaw(pin, &spread);
@@ -607,8 +579,7 @@ int readProbe(int port, int *rawOut = nullptr) {
   return probeStreak[port - 1] >= PROBE_STREAK_NEEDED ? moisturePercent(raw) : -1;
 }
 
-// True when a probe moved by REPORT_CHANGE_PERCENT or more since the last
-// report, or started / stopped reading.
+// True if any probe changed enough (or started/stopped) since the last report
 bool probesChanged() {
   bool changed = false;
   for (int port = 1; port <= portCount; port++) {
@@ -620,10 +591,8 @@ bool probesChanged() {
   return changed;
 }
 
+// Sends one reading per port; a faulty probe sends only its pump state
 void sendTelemetry() {
-  // One reading per port. The server records each on the pot connected to
-  // that port in the app (ports with nothing connected are ignored). A faulty
-  // probe sends only its pump state, so automatic watering never acts on it.
   JsonDocument doc;
   doc["hardwareId"] = hardwareId;
   doc["ports"] = portCount;
@@ -645,6 +614,7 @@ void sendTelemetry() {
   String response;
   int code = request("POST", "/api/iot/ingest", body, &response, true);
   if (code == 401) return forgetKey("telemetry");
+  // Print the result to the Serial Monitor
   if (code >= 200 && code < 300) {
     for (int port = 1; port <= portCount; port++) {
       int raw = raws[port - 1];
@@ -659,10 +629,9 @@ void sendTelemetry() {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Pairing loop
-// ---------------------------------------------------------------------------
+// ---- Pairing loop ----
 
+// Asks the server if someone is adding this board; saves the key once claimed
 void pairStep() {
   JsonDocument doc;
   doc["hardwareId"] = hardwareId;
@@ -682,6 +651,7 @@ void pairStep() {
   JsonDocument reply;
   if (deserializeJson(reply, response)) return;
   String status = String((const char *)(reply["status"] | ""));
+  // The app is waiting for a BOOT press
   if (status == "confirm") {
     if (!confirmUntil) Serial.println(">>> Someone is adding this board in the app: press BOOT to confirm.");
     confirmUntil = millis() + (unsigned long)(reply["msLeft"] | 30000);
@@ -690,6 +660,7 @@ void pairStep() {
   }
   confirmUntil = 0;
   if (reply["error"].is<const char *>()) Serial.printf("Pairing: %s\n", (const char *)reply["error"]);
+  // Added to an account: save the device key and start normal work
   if (status == "claimed") {
     deviceKey = String((const char *)(reply["deviceKey"] | ""));
     if (deviceKey.length()) {
@@ -705,8 +676,9 @@ void pairStep() {
   }
 }
 
-// ---------------------------------------------------------------------------
+// ---- Button, Wi-Fi watchdog, setup and main loop ----
 
+// True once the BOOT button has been held down for ms milliseconds
 bool bootHeldFor(unsigned long ms) {
   if (digitalRead(SETUP_BUTTON_PIN) == LOW) {
     if (!bootPressedAt) bootPressedAt = millis();
@@ -716,15 +688,13 @@ bool bootHeldFor(unsigned long ms) {
   return false;
 }
 
-// Wi-Fi drops now and then (router restart, weak signal). Retry every 15 s —
-// calling reconnect on every loop interrupts each attempt so it never finishes
-// ("connecting, return error"). If it stays down for 3 minutes, restart the
-// board (pumps off first): a fresh start reliably gets back online.
+// Wi-Fi lost: retry every 15 s, restart the board (pumps off) after 3 min
 const unsigned long WIFI_RETRY_MS = 15000;
 const unsigned long WIFI_RESTART_AFTER_MS = 180000;
 unsigned long wifiLostAt = 0;
 unsigned long lastWifiTryAt = 0;
 
+// Keeps the Wi-Fi connected (called on every loop)
 void keepWiFi(unsigned long now) {
   if (WiFi.status() == WL_CONNECTED) {
     if (wifiLostAt) Serial.printf("Wi-Fi back after %lu s\n", (now - wifiLostAt) / 1000);
@@ -749,13 +719,13 @@ void keepWiFi(unsigned long now) {
   }
 }
 
+// Runs once at power-on: pumps off, load settings, join Wi-Fi
 void setup() {
-  // Preload the OFF level before enabling the pin so the pump never twitches on boot.
-  // Coming out of sleep: release the relay pins that were held OFF.
-  gpio_deep_sleep_hold_dis();
-  // The port count chosen in the app (saved), so only those relay pins are driven.
+  gpio_deep_sleep_hold_dis();  // after sleep: release relay pins held OFF
+  // Load the saved port count so only those relay pins are driven
   config.begin("cfg", false);
   portCount = config.isKey("ports") ? constrain(config.getInt("ports", PORT_COUNT), 1, MAX_PORTS) : PORT_COUNT;
+  // Set OFF before enabling each pin so the pump never twitches on boot
   for (int i = 0; i < portCount; i++) {
     gpio_hold_dis((gpio_num_t)RELAY_PIN_LIST[i]);
     digitalWrite(RELAY_PIN_LIST[i], RELAY_OFF_LEVEL);
@@ -780,13 +750,13 @@ void setup() {
   if (!deviceKey.length()) printPairingHelp();
 }
 
+// Runs over and over: buttons, Wi-Fi, safety, pairing, readings, commands
 void loop() {
   const unsigned long now = millis();
 
   const bool confirming = !deviceKey.length() && confirmUntil && now < confirmUntil;
 
-  // While unclaimed, a short BOOT press means "yes, add me". Remember it for a
-  // little while so the order of press and app request doesn't matter.
+  // While unclaimed, a BOOT press means "yes, add me" (remembered for a while)
   bool bootDown = digitalRead(SETUP_BUTTON_PIN) == LOW;
   if (!deviceKey.length() && bootDown && !bootWasDown) {
     pressLatchedUntil = now + PRESS_LATCH_MS;
@@ -809,6 +779,7 @@ void loop() {
     Serial.println("Communication-loss fail-safe switched all pumps OFF");
   }
 
+  // Not added to an account yet: blink and keep trying to pair
   if (!deviceKey.length()) {
     // Slow blink: waiting to be added. Fast blink: press BOOT to confirm.
     digitalWrite(LED_PIN, (now / (confirming ? 100 : 500)) % 2);
@@ -828,6 +799,7 @@ void loop() {
     lastSampleAt = now;
     reportNow = probesChanged();
   }
+  // Send a report when it's time, or early if something changed
   const bool due = now - lastTelemetryAt >= TELEMETRY_INTERVAL_MS;
   const bool early = reportNow && now - lastTelemetryAt >= MIN_REPORT_GAP_MS;
   if (due || early) {
@@ -835,6 +807,7 @@ void loop() {
     reportNow = false;
     sendTelemetry();
   }
+  // Check for pump commands from the app
   if (deviceKey.length() && now - lastCommandPollAt >= COMMAND_POLL_INTERVAL_MS) {
     lastCommandPollAt = now;
     processPendingCommands();

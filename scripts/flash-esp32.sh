@@ -8,6 +8,7 @@
 # If the upload can't connect: hold the board's BOOT button until "Writing..." appears.
 set -euo pipefail
 
+# Folders and default options
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SRC="$ROOT/iot/esp32/src"
 BUILD="${TMPDIR:-/tmp}/smartagri_node"
@@ -15,6 +16,7 @@ FQBN_BASE="esp32:esp32:esp32"
 ERASE=none
 PORT=""
 
+# Read command-line options (--reset, -p <port>, -h)
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --erase|--reset) ERASE=all ;;
@@ -25,6 +27,7 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
+# Make sure arduino-cli, the ESP32 core and libraries are installed
 command -v arduino-cli >/dev/null || { echo "Install arduino-cli first:  brew install arduino-cli"; exit 1; }
 
 echo "==> Checking ESP32 core and libraries (first run downloads them)"
@@ -51,6 +54,7 @@ rm -rf "$BUILD" && mkdir -p "$BUILD"
 cp "$SRC/main.ino" "$BUILD/smartagri_node.ino"
 cp "$SRC/config.h" "$SRC/root_ca.h" "$BUILD/"
 
+# Build, then upload to the board
 echo "==> Compiling"
 arduino-cli compile --fqbn "$FQBN_BASE" "$BUILD"
 
@@ -58,6 +62,7 @@ arduino-cli compile --fqbn "$FQBN_BASE" "$BUILD"
 echo "==> Uploading (hold BOOT if it says 'Connecting....' for long)"
 arduino-cli upload --fqbn "$FQBN_BASE:UploadSpeed=115200,EraseFlash=$ERASE" -p "$PORT" "$BUILD"
 
+# Tell the user what to do next
 echo
 echo "Done. Next:"
 if [[ "$ERASE" == all ]]; then

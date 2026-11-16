@@ -1,12 +1,14 @@
 "use client";
 
-// Inputs shared by the Sign in and Create account forms.
+// Inputs, error box and submit button shared by Sign in and Create account
 import { useState } from "react";
 import { CircleAlert, Eye, EyeOff, Loader2, type LucideIcon } from "lucide-react";
 
+// Shared styling for the auth text boxes
 const inputClass =
   "w-full rounded-xl border border-slate-300 bg-white py-2.5 pl-10 pr-3 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/15 dark:border-slate-700 dark:bg-slate-900 dark:text-white";
 
+// Text box with an icon; password fields get a show/hide eye button
 export function AuthField({
   label,
   icon: Icon,
@@ -28,6 +30,7 @@ export function AuthField({
   autoFocus?: boolean;
   hint?: React.ReactNode;
 }) {
+  // Whether the password is shown as plain text
   const [show, setShow] = useState(false);
   const isPassword = type === "password";
   return (
@@ -45,6 +48,7 @@ export function AuthField({
           required
           className={`${inputClass} ${isPassword ? "pr-11" : ""}`}
         />
+        {/* Show/hide password button */}
         {isPassword ? (
           <button
             type="button"
@@ -61,6 +65,7 @@ export function AuthField({
   );
 }
 
+// Red error box shown when sign in or sign up fails
 export function AuthError({ message }: { message: string }) {
   if (!message) return null;
   return (
@@ -71,6 +76,7 @@ export function AuthError({ message }: { message: string }) {
   );
 }
 
+// Full-width submit button with a loading spinner
 export function AuthSubmit({ loading, label, loadingLabel, disabled }: { loading: boolean; label: string; loadingLabel: string; disabled?: boolean }) {
   return (
     <button

@@ -1,10 +1,6 @@
 "use client";
 
-// Themed date pickers (the browser's built-in ones can't be styled):
-// - DatePicker: one date, "YYYY-MM-DD".
-// - DateRangePicker: a from/to range with times, "YYYY-MM-DDTHH:mm" each,
-//   with quick presets and a two-month calendar.
-// Dates are handled as local calendar days (no UTC shifting).
+// Styled date picker and date-range picker (uses local days, no UTC shifts)
 import { useCallback, useRef, useState } from "react";
 import { CalendarDays, ChevronLeft, ChevronRight, X } from "lucide-react";
 import { useDismiss } from "@/components/HeaderMenus";
@@ -12,8 +8,10 @@ import { useNow } from "@/components/ListPage";
 
 // ---------- date helpers (local, string based) ----------
 
+// A day written as text, e.g. "2026-11-06"
 type Ymd = string; // "2026-11-06"
 
+// Small helpers to convert and shift "YYYY-MM-DD" day strings
 const pad = (n: number) => String(n).padStart(2, "0");
 const toYmd = (d: Date): Ymd => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const fromYmd = (ymd: Ymd) => {
@@ -32,15 +30,18 @@ const addMonths = (month: string, delta: number) => {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
 };
 
+// Show a day as text like "6 Nov 2026"
 function formatDay(ymd: Ymd, withYear = true) {
   return fromYmd(ymd).toLocaleDateString(undefined, { day: "numeric", month: "short", ...(withYear ? { year: "numeric" } : {}) });
 }
 
 
+// Short weekday names for the calendar header
 const WEEKDAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
 
 // ---------- Calendar month grid ----------
 
+// One month of clickable days; highlights the chosen day or range
 function MonthGrid({
   month,
   selectedStart,
@@ -62,6 +63,7 @@ function MonthGrid({
   max?: Ymd;
   today: Ymd;
 }) {
+  // Build the grid: blank cells before the 1st, then each day of the month
   const first = fromYmd(`${month}-01`);
   const daysInMonth = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate();
   const cells: (Ymd | null)[] = [
@@ -74,6 +76,7 @@ function MonthGrid({
   return (
     <div className="w-[15.5rem]">
       <p className="mb-2 text-center text-sm font-bold">{first.toLocaleDateString(undefined, { month: "long", year: "numeric" })}</p>
+      {/* Weekday names row */}
       <div className="grid grid-cols-7 text-center text-[11px] font-semibold text-slate-400">
         {WEEKDAYS.map((day) => (
           <span key={day} className="py-1">
@@ -81,6 +84,7 @@ function MonthGrid({
           </span>
         ))}
       </div>
+      {/* Day buttons */}
       <div className="grid grid-cols-7 gap-y-0.5" onMouseLeave={() => onHover?.(null)}>
         {cells.map((day, i) => {
           if (!day) return <span key={`blank-${i}`} />;
@@ -121,6 +125,7 @@ function MonthGrid({
   );
 }
 
+// Arrow button to go to the previous or next month
 function NavButton({ dir, onClick, disabled }: { dir: "prev" | "next"; onClick: () => void; disabled?: boolean }) {
   return (
     <button
@@ -135,6 +140,7 @@ function NavButton({ dir, onClick, disabled }: { dir: "prev" | "next"; onClick: 
   );
 }
 
+// Shared styles for the picker button and its popup
 const triggerClass =
   "flex w-full items-center gap-2.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-left text-sm transition hover:border-slate-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600 dark:border-slate-700 dark:bg-slate-950 dark:hover:border-slate-600";
 const popoverClass =
@@ -142,6 +148,7 @@ const popoverClass =
 
 // ---------- Single date ----------
 
+// Pick a single date from a popup calendar
 export function DatePicker({
   label,
   value,
@@ -160,6 +167,7 @@ export function DatePicker({
   placeholder?: string;
   allowClear?: boolean;
 }) {
+  // Today's date, the max allowed day, and popup/month state
   const now = useNow(60_000);
   const today = toYmd(new Date(now));
   const maxDay = max === "today" ? today : max;
@@ -170,16 +178,19 @@ export function DatePicker({
   const close = useCallback(() => setOpen(false), []);
   useDismiss(open, close, rootRef, triggerRef);
 
+  // Open or close the calendar, starting on the chosen month
   function toggle() {
     if (!open) setMonth(monthKey(value || today));
     setOpen(!open);
   }
 
+  // Pick a day and close the calendar
   function pick(day: Ymd) {
     onChange(day);
     setOpen(false);
   }
 
+  // Quick-pick buttons, hidden if outside the allowed range
   const quick = [
     { label: "Today", day: today },
     { label: "Yesterday", day: addDays(today, -1) },
@@ -189,6 +200,7 @@ export function DatePicker({
   return (
     <div ref={rootRef} className="relative">
       {label ? <span className="mb-1 block text-sm font-bold text-slate-700 dark:text-slate-200">{label}</span> : null}
+      {/* Button showing the chosen date, plus a clear (x) button */}
       <div className="relative">
         <button ref={triggerRef} type="button" onClick={toggle} aria-haspopup="dialog" aria-expanded={open} className={triggerClass}>
           <CalendarDays size={16} className="shrink-0 text-slate-400" />
@@ -205,6 +217,7 @@ export function DatePicker({
           </button>
         ) : null}
       </div>
+      {/* Calendar popup */}
       {open ? (
         <div role="dialog" aria-label="Choose a date" className={`${popoverClass} left-0`}>
           <div className="mb-1 flex items-center justify-between">
@@ -242,17 +255,21 @@ export interface DateRange {
   to: string;
 }
 
+// Text for the range button, e.g. "1 Nov → 6 Nov 2026"
 function rangeLabel(range: DateRange) {
   const sameYear = range.from.slice(0, 4) === range.to.slice(0, 4);
   if (range.from === range.to) return formatDay(range.from);
   return `${formatDay(range.from, !sameYear)}  →  ${formatDay(range.to, true)}`;
 }
 
+// Number of days in a range, counting both ends
 function dayCount(range: { from: Ymd; to: Ymd }) {
   return Math.round((fromYmd(range.to).getTime() - fromYmd(range.from).getTime()) / 86_400_000) + 1;
 }
 
+// Pick a from/to date range with quick presets and a two-month calendar
 export function DateRangePicker({ value, onChange, maxToday = true }: { value: DateRange; onChange: (range: DateRange) => void; maxToday?: boolean }) {
+  // Today, max day, popup state, the range being picked and the shown month
   const now = useNow(60_000);
   const today = toYmd(new Date(now));
   const maxDay = maxToday ? today : undefined;
@@ -266,6 +283,7 @@ export function DateRangePicker({ value, onChange, maxToday = true }: { value: D
   const close = useCallback(() => setOpen(false), [setOpen]);
   useDismiss(open, close, rootRef, triggerRef);
 
+  // Open or close the picker, starting from the current range
   function toggle() {
     if (!open) {
       // Start from the current value each time the picker opens.
@@ -276,6 +294,7 @@ export function DateRangePicker({ value, onChange, maxToday = true }: { value: D
     setOpen(!open);
   }
 
+  // First click sets the start day, second click sets the end day
   function pick(day: Ymd) {
     if (!start || end || day < start) {
       setStart(day);
@@ -285,11 +304,13 @@ export function DateRangePicker({ value, onChange, maxToday = true }: { value: D
     }
   }
 
+  // Apply a range straight away and close the picker
   function preset(from: Ymd, to: Ymd) {
     onChange({ from, to });
     setOpen(false);
   }
 
+  // Quick-pick ranges like "Last 7 days"
   const firstOfMonth = `${monthKey(today)}-01`;
   const presets = [
     { label: "Today", run: () => preset(today, today) },
@@ -303,6 +324,7 @@ export function DateRangePicker({ value, onChange, maxToday = true }: { value: D
 
   return (
     <div ref={rootRef} className="relative">
+      {/* Button showing the chosen range */}
       <button ref={triggerRef} type="button" onClick={toggle} aria-haspopup="dialog" aria-expanded={open} className={`${triggerClass} sm:w-auto`}>
         <CalendarDays size={16} className="shrink-0 text-emerald-600 dark:text-emerald-400" />
         <span className={`truncate ${value.from ? "font-semibold" : "text-slate-400"}`}>{value.from && value.to ? rangeLabel(value) : "Pick dates"}</span>
@@ -341,6 +363,7 @@ export function DateRangePicker({ value, onChange, maxToday = true }: { value: D
                 </div>
               </div>
 
+              {/* Summary of the picked range, with Cancel and Apply */}
               <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3 dark:border-slate-800">
                 <p className="text-xs text-slate-500 dark:text-slate-400">
                   {!start ? (

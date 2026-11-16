@@ -1,7 +1,9 @@
+// Root layout: wraps every page with <html>, global CSS, theme and providers.
 import type { Metadata } from "next";
 import "./globals.css";
 import { Providers } from "@/components/Providers";
 
+// Browser tab title and search description.
 export const metadata: Metadata = {
   title: "SmartAgri — Smart watering & plant care",
   description:
@@ -11,6 +13,7 @@ export const metadata: Metadata = {
 // Same rule the theme switch uses: saved choice first, else the OS setting.
 const THEME_SCRIPT = `(function(){try{var t=localStorage.getItem("theme");var d=t?t==="dark":window.matchMedia("(prefers-color-scheme: dark)").matches;var r=document.documentElement;r.classList.toggle("dark",d);r.style.colorScheme=d?"dark":"light"}catch(e){}})()`;
 
+// The outer HTML shell for the whole app.
 export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {

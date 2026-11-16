@@ -1,5 +1,4 @@
-// Preserves the existing FastAPI /predict integration and records each result
-// against the selected Garden -> Pot -> Plant hierarchy.
+// API /api/disease-detection/analyze: diagnose a leaf photo and save the result
 import { NextResponse } from "next/server";
 import type { Severity } from "@prisma/client";
 import { requireUser } from "@/lib/api-auth";
@@ -15,11 +14,14 @@ import { createAppNotification } from "@/lib/notify";
 
 export const runtime = "nodejs";
 
+// Turn the AI's severity text into the database's Severity value
 function mapSeverity(s: AiPrediction["severity"]): Severity {
   return s === "high" ? "high" : s === "medium" ? "medium" : "low";
 }
 
+// POST: check the photo, run the AI, then save report, history and alerts
 export async function POST(req: Request) {
+  // Auth check: only logged-in users
   const gate = await requireUser();
   if (gate instanceof NextResponse) return gate;
   const userId = gate;
@@ -31,12 +33,14 @@ export async function POST(req: Request) {
     const potId = form.get("potId");
     const submittedPlantId = form.get("plantId");
 
+    // Validation: need an image file, a garden and a pot
     if (!(file instanceof Blob)) {
       return NextResponse.json({ error: "An image file is required (field 'file')" }, { status: 400 });
     }
     if (typeof gardenId !== "string" || typeof potId !== "string") {
       return NextResponse.json({ error: "Garden and pot are required" }, { status: 400 });
     }
+    // Check the image type and size
     try {
       validateDiseaseImage(file);
     } catch (error) {
@@ -70,10 +74,11 @@ export async function POST(req: Request) {
         { status: 503 },
       );
     }
+    // Run the AI: online engine first if chosen, local model as backup
     let prediction: AiPrediction & { summary?: string };
     let engineUsed = "local";
     let fallbackReason: string | null = null;
-    // Tell the local model the pot's crop (when it knows it) so it only weighs that crop's diseases.
+    // Tell the local model the crop so it only checks that crop's diseases
     const runLocal = () => analyzeLeafImage(file, filename, modelCropFor(plant.commonName));
     try {
       if (engine.provider === "LOCAL") {
@@ -96,11 +101,11 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Disease detection service is unavailable" }, { status: 502 });
     }
 
-    // Store one private image after a successful prediction, then reuse its
-    // reference in both the legacy report and the new immutable history row.
+    // Save the photo privately; both the report and history rows point to it
     const image = await saveDiseaseImage(file);
     try {
       const healthScoreContribution = healthContributionFromPrediction(prediction);
+      // DB write: report, history, plant health and alerts all-or-nothing
       const { report, history } = await prisma.$transaction(async (tx) => {
         const report = await tx.diseaseReport.create({
           data: {
@@ -155,6 +160,7 @@ export async function POST(req: Request) {
                 : "diseased",
           },
         });
+        // Queue a Telegram message and an in-app notification about the result
         await enqueueTelegramDelivery(tx, {
           userId,
           eventKey: `disease-analysis:${history.id}`,
@@ -190,6 +196,7 @@ export async function POST(req: Request) {
       });
       return NextResponse.json({ prediction, report, history }, { status: 201 });
     } catch (error) {
+      // DB save failed: delete the stored photo so it isn't left orphaned
       await deleteDiseaseImage(image.imageRef);
       throw error;
     }

@@ -1,8 +1,6 @@
 "use client";
 
-// PAGE: Smart irrigation — pick a garden, then a pot from the strip of pot
-// cards, and control it: automatic vs manual, pump on/off, watering levels,
-// with its watering history (paged, filterable) alongside.
+// Irrigation page: pick a pot, switch auto/manual, run the pump, see history.
 import { Suspense, useCallback, useId, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -40,12 +38,14 @@ import { errorMessage, useFeedback } from "@/components/Feedback";
 import { apiPatch, apiPost } from "@/lib/api-client";
 import { getSelectedGardenId } from "@/lib/selected-garden";
 
+// Garden option for the garden picker
 interface Garden {
   id: string;
   name: string;
   location: string | null;
   type: string;
 }
+// One pot with its watering settings, live moisture and last pump command
 interface Pot {
   id: string;
   label: string;
@@ -74,6 +74,7 @@ interface Pot {
     executionResultAt: string | null;
   } | null;
 }
+// One watering history event (pump on/off or mode change)
 interface LogRow {
   id: string;
   mode: "automatic" | "manual" | "scheduled";
@@ -85,6 +86,7 @@ interface LogRow {
   offThreshold: number | null;
   startedAt: string;
 }
+// One page of history from the API, plus today's totals
 interface LogPage {
   items: LogRow[];
   nextCursor: string | null;
@@ -95,10 +97,12 @@ interface LogPage {
   };
 }
 
-/** Readings arrive every 5 s; older than this means the probe isn't reporting. */
+/** A reading older than 60 s means the probe has stopped reporting. */
 const PROBE_SILENT_MS = 60_000;
+// History rows loaded per page
 const HISTORY_PAGE = 15;
 
+// True when the pot's last reading is too old
 function probeSilent(pot: Pot, now: number) {
   return Boolean(
     pot.moistureRecordedAt &&
@@ -106,6 +110,7 @@ function probeSilent(pot: Pot, now: number) {
   );
 }
 
+// True when no device is connected to the pot
 function hasNoSensor(pot: Pot) {
   return pot._count?.deviceMappings === 0;
 }
@@ -118,6 +123,7 @@ function portLink(pot: Pot) {
   return pot.sensors?.[0] ?? null;
 }
 
+// True when the pot's device is offline or never connected
 function deviceDown(pot: Pot) {
   const link = portLink(pot);
   return Boolean(link && (link.status === "OFFLINE" || link.status === "NEVER_SEEN"));
@@ -128,12 +134,14 @@ function liveMoisture(pot: Pot, now: number) {
   return hasNoSensor(pot) || probeSilent(pot, now) ? null : pot.currentMoisture;
 }
 
+// Grey colours used when there's no live reading
 const GREY = {
   tone: "text-slate-400",
   dot: "bg-slate-300 dark:bg-slate-600",
   stroke: "stroke-slate-300 dark:stroke-slate-600",
 };
 
+// Text and colours for the pot's moisture (too dry, just right, offline...)
 function moistureState(pot: Pot, now: number) {
   if (hasNoSensor(pot)) return { text: "No device", ...GREY };
   const link = portLink(pot);
@@ -173,6 +181,7 @@ function moistureState(pot: Pot, now: number) {
   };
 }
 
+// Turns seconds into "45s", "3m 20s" or "1h 5m"
 function formatDuration(seconds: number) {
   if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);
@@ -181,8 +190,7 @@ function formatDuration(seconds: number) {
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
-// ?garden=<id>&pot=<id> (e.g. a pot card's "Watering settings") opens that
-// pot directly; reading search params needs a Suspense boundary.
+// Page entry; Suspense is needed to read ?garden=&pot= from the URL
 export default function IrrigationPage() {
   return (
     <Suspense fallback={null}>
@@ -191,8 +199,10 @@ export default function IrrigationPage() {
   );
 }
 
+// Main page body: garden picker, pot chooser and the selected pot's controls
 function IrrigationContent() {
   const searchParams = useSearchParams();
+  // Load gardens, then work out which garden is selected
   const { data: gardens } = useSWR<Garden[]>("/api/gardens");
   const [chosenGardenId, setChosenGardenId] = useState<string | null>(() =>
     searchParams.get("garden"),
@@ -205,6 +215,7 @@ function IrrigationContent() {
       : (gardens?.[0]?.id ?? ""));
   const garden = gardens?.find((g) => g.id === gardenId);
 
+  // Load the garden's pots (refresh every 3 s) and pick the selected one
   const { data: pots, mutate: mutatePots } = useSWR<Pot[]>(
     gardenId ? `/api/pots?gardenId=${gardenId}` : null,
     {
@@ -241,6 +252,7 @@ function IrrigationContent() {
         }
       />
 
+      {/* Loading, no gardens, no pots, or the pot chooser + controls */}
       {!gardens || (gardenId && !pots) ? (
         <div className="space-y-5" aria-hidden="true">
           <div className="flex gap-2">
@@ -292,8 +304,10 @@ function IrrigationContent() {
 /** Up to this many pots show as a row of cards; more get the compact picker. */
 const STRIP_MAX = 6;
 
+// Filters for the pot picker
 type PotFilter = "all" | "dry" | "watering" | "nosensor";
 
+// True when a pot fits the chosen pot filter
 function potMatches(pot: Pot, filter: PotFilter, now: number) {
   if (filter === "dry") {
     const m = liveMoisture(pot, now);
@@ -304,7 +318,7 @@ function potMatches(pot: Pot, filter: PotFilter, now: number) {
   return true;
 }
 
-/** Few pots: a row of cards. Many pots: a picker with search, filters and ‹ › stepping. */
+/** Pot chooser: a row of cards for few pots, a search picker for many. */
 function PotChooser({
   pots,
   selectedId,
@@ -352,6 +366,7 @@ function PotChooser({
   );
 }
 
+// Clickable card for one pot in the pot row
 function PotCardButton({
   pot,
   now,
@@ -381,7 +396,7 @@ function PotCardButton({
   );
 }
 
-/** Dot · label/plant/state · moisture/pump — shared by cards, picker trigger and rows. */
+/** Shared pot row: status dot, name, plant, moisture and pump state. */
 function PotRowContent({
   pot,
   state,
@@ -423,6 +438,7 @@ function PotRowContent({
   );
 }
 
+// Dropdown pot picker with previous / next buttons (for many pots)
 function PotPicker({
   pots,
   selectedId,
@@ -446,6 +462,7 @@ function PotPicker({
     pots.findIndex((pot) => pot.id === selectedId),
   );
   const selected = pots[index];
+  // Go to the previous / next pot, wrapping around
   const step = (delta: number) =>
     onSelect(pots[(index + delta + pots.length) % pots.length].id);
   const arrow =
@@ -513,6 +530,7 @@ function PotPicker({
   );
 }
 
+// Filter chips shown in the pot picker
 const POT_FILTERS: { value: PotFilter; label: string }[] = [
   { value: "all", label: "All" },
   { value: "dry", label: "Too dry" },
@@ -520,7 +538,7 @@ const POT_FILTERS: { value: PotFilter; label: string }[] = [
   { value: "nosensor", label: "No reading" },
 ];
 
-/** Mounted only while the picker is open, so search and filter reset on close. */
+/** Searchable pot list inside the picker; resets each time it opens. */
 function PotSearchList({
   pots,
   selectedId,
@@ -547,6 +565,7 @@ function PotSearchList({
   );
   const optionId = (pot: Pot) => `${listId}-${pot.id}`;
 
+  // Move the keyboard highlight and scroll it into view
   function move(next: number) {
     const i = Math.max(0, Math.min(next, shown.length - 1));
     setHighlight(i);
@@ -556,6 +575,7 @@ function PotSearchList({
         ?.scrollIntoView({ block: "nearest" });
   }
 
+  // Arrow keys move the highlight, Enter picks the pot
   function onKeyDown(event: React.KeyboardEvent) {
     if (event.key === "ArrowDown") {
       event.preventDefault();
@@ -664,6 +684,7 @@ function PotSearchList({
   );
 }
 
+// Main control card for one pot plus its watering history
 function PotControl({
   pot,
   gardenId,
@@ -681,6 +702,7 @@ function PotControl({
   const [historyMode, setHistoryMode] = useState<HistoryFilter>("all");
   const { toast } = useFeedback();
   const now = useNow(5000);
+  // Load this pot's watering history
   const history = usePotHistory(gardenId, pot.id, historyMode, now);
 
   const on = onDraft ?? pot.moistureOnThreshold;
@@ -702,6 +724,7 @@ function PotControl({
     : undefined;
   const connectHref = `/gardens/${gardenId}?tab=pots&pot=${pot.id}`;
 
+  // Run an API change, show its message and refresh pots and history
   async function run(label: string, action: () => Promise<string | undefined>) {
     setBusy(label);
     try {
@@ -716,6 +739,7 @@ function PotControl({
     }
   }
 
+  // Switch between automatic and manual watering
   const setMode = (mode: Pot["irrigationMode"]) =>
     run("mode", async () => {
       const response = await apiPatch<{ autoDecision?: { message: string } }>(
@@ -730,6 +754,7 @@ function PotControl({
       );
     });
 
+  // Save the start / stop watering levels
   const saveLevels = () =>
     run("levels", async () => {
       const response = await apiPatch<{ autoDecision?: { message: string } }>(
@@ -744,6 +769,7 @@ function PotControl({
       return response.autoDecision?.message ?? "Watering levels saved.";
     });
 
+  // Turn the pump on or off by hand
   const setPump = (pumpState: "on" | "off") =>
     run(pumpState, async () => {
       const response = await apiPost<{ message: string }>(
@@ -829,7 +855,7 @@ function PotControl({
           </div>
         </header>
 
-        {/* Status: moisture and pump side by side (stacked only when the card is narrow) */}
+        {/* Status: moisture and pump side by side (stacked when narrow) */}
         <div className="p-4">
           <div className="flex flex-col gap-4 rounded-xl bg-slate-50 p-3.5 dark:bg-slate-950/60 @xl:flex-row @xl:items-center">
             <div className="flex min-w-0 flex-1 items-center gap-4">
@@ -889,7 +915,7 @@ function PotControl({
               className="h-px bg-slate-200 dark:bg-slate-800 @xl:h-16 @xl:w-px"
             />
 
-            {/* Pump */}
+            {/* Pump state, on/off button and command status */}
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-3">
                 <span
@@ -1070,7 +1096,7 @@ function PotControl({
   );
 }
 
-/** Which device and port water this pot, and whether its probe is live. */
+/** Chip showing the pot's device and port, and whether its probe is live. */
 function SensorChip({
   pot,
   noSensor,
@@ -1179,15 +1205,17 @@ function MoistureRing({
 
 // ---------- History ----------
 
+// History filter: all, automatic or manual events
 type HistoryFilter = "all" | "automatic" | "manual";
 
+// Loads the pot's watering history page by page (refreshes every 5 s)
 function usePotHistory(
   gardenId: string,
   potId: string,
   mode: HistoryFilter,
   now: number,
 ) {
-  // Local midnight, so "today" means the user's day. Stable all day long.
+  // Local midnight, so "today" is the user's own day
   const midnight = new Date(now);
   midnight.setHours(0, 0, 0, 0);
   const since = midnight.toISOString();
@@ -1216,6 +1244,7 @@ function usePotHistory(
 
 type History = ReturnType<typeof usePotHistory>;
 
+// History filter buttons
 const FILTERS: { value: HistoryFilter; label: string }[] = [
   { value: "all", label: "All" },
   { value: "automatic", label: "Automatic" },
@@ -1257,6 +1286,7 @@ function describe(log: LogRow) {
   };
 }
 
+// "Today", "Yesterday" or a short date for grouping history
 function dayLabel(date: Date, now: number) {
   const today = new Date(now);
   today.setHours(0, 0, 0, 0);
@@ -1272,6 +1302,7 @@ function dayLabel(date: Date, now: number) {
   });
 }
 
+// Side panel with today's totals, filters and the watering history list
 function HistoryPanel({
   history,
   mode,
@@ -1287,7 +1318,7 @@ function HistoryPanel({
 }) {
   const { items, summary } = history;
 
-  // How long each watering ran: from a "started" to the next "stopped" (newer) row.
+  // How long each watering ran: from "started" to the next "stopped" row
   const ranFor = new Map<string, number>();
   let stopAt: number | null = null;
   for (const log of items) {
@@ -1303,6 +1334,7 @@ function HistoryPanel({
     }
   }
 
+  // Group history rows by day
   const groups: { label: string; logs: LogRow[] }[] = [];
   for (const log of items) {
     const label = dayLabel(new Date(log.startedAt), now);
@@ -1322,6 +1354,7 @@ function HistoryPanel({
           Every pump start and stop for {potLabel}.
         </p>
 
+        {/* Today's watering count and pump time */}
         <div className="mt-4 grid grid-cols-2 gap-2">
           <div className="rounded-xl bg-slate-50 px-3 py-2 dark:bg-slate-950/60">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
@@ -1368,6 +1401,7 @@ function HistoryPanel({
         </div>
       </div>
 
+      {/* History list grouped by day, with "load older" */}
       <div className="max-h-[32rem] overflow-y-auto p-5 [scrollbar-width:thin]">
         {history.loading ? (
           <div className="space-y-3" aria-hidden="true">
@@ -1487,6 +1521,7 @@ function HistoryPanel({
 
 // ---------- Small pieces ----------
 
+// The pot's ⋮ menu: pump, mode, recommended levels, refresh, open in garden
 function PotActions({
   pot,
   gardenId,
@@ -1514,6 +1549,7 @@ function PotActions({
   const manual = pot.irrigationMode === "MANUAL";
   const pumpOn = pot.pumpState === "on";
 
+  // Close the menu, then do the chosen action
   function run(action: () => void) {
     setOpen(false);
     action();
@@ -1608,6 +1644,7 @@ function PotActions({
   );
 }
 
+// Labelled 0–100% slider for a watering level
 function Slider({
   label,
   value,

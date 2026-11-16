@@ -1,28 +1,24 @@
-// Starter data: one user, two gardens, two pots in each (every pot has a
-// plant). No devices — pair a real ESP32 from the Sensors page.
-//
-// Won't overwrite an existing account: if the user already exists it stops.
-// To wipe that user (and everything they own) and start over, run with
-// SEED_RESET=true. It never touches any other account.
+// Fills the database with a demo user, 2 gardens and 4 pots (SEED_RESET=true redoes it).
 import { PrismaClient } from "@prisma/client";
 import crypto from "node:crypto";
 import { findPlantProfile } from "../src/lib/plant-catalog";
 
 const prisma = new PrismaClient();
 
-// Mirror of lib/password.ts (scrypt) — kept inline so seed has no app imports.
+// Hashes a password the same way as lib/password.ts (scrypt)
 function hashPassword(password: string, salt?: string) {
   const passwordSalt = salt || crypto.randomBytes(16).toString("hex");
   const passwordHash = crypto.scryptSync(password, passwordSalt, 64).toString("hex");
   return { passwordHash, passwordSalt };
 }
 
+// Demo login details
 const DEMO_EMAIL = "sanzida@smartagri.ai";
 const DEMO_NAME = "Sanzida Zinia";
-// Seed credentials are generated for each run unless supplied explicitly for
-// local development. They are never production credentials.
+// Random password each run unless DEMO_PASSWORD is set (demo only)
 const DEMO_PASSWORD = process.env.DEMO_PASSWORD ?? crypto.randomBytes(18).toString("base64url");
 
+// The demo gardens and the pots/plants inside each one
 const GARDENS = [
   {
     name: "Rooftop Garden",
@@ -48,10 +44,12 @@ const GARDENS = [
   },
 ];
 
+// Creates the demo user, gardens, pots, plants and a welcome message
 async function main() {
   console.log("Seeding SmartAgri demo data…");
   const { passwordHash, passwordSalt } = hashPassword(DEMO_PASSWORD);
 
+  // Safety: stop if the demo user exists, unless SEED_RESET=true
   const existing = await prisma.user.findUnique({ where: { email: DEMO_EMAIL }, select: { id: true } });
   if (existing) {
     if (process.env.SEED_RESET !== "true") {
@@ -59,7 +57,7 @@ async function main() {
       console.log("To DELETE that account and everything it owns and seed it again, run:  SEED_RESET=true npm run db:seed");
       return;
     }
-    // Cascade clears everything this user owns. No other account is touched.
+    // Deletes only this user and everything they own
     await prisma.user.delete({ where: { id: existing.id } });
   }
 
@@ -81,6 +79,7 @@ async function main() {
       data: { userId: user.id, name: spec.name, type: spec.type, location: spec.location, lat: spec.lat, lng: spec.lng },
     });
 
+    // Each pot gets watering thresholds and a plant from the plant catalog
     for (const potSpec of spec.pots) {
       const profile = findPlantProfile(potSpec.plant);
       if (!profile) throw new Error(`"${potSpec.plant}" is not in the plant catalog`);
@@ -140,6 +139,7 @@ async function main() {
   console.log("  Gardens: ", GARDENS.map((g) => `${g.name} (${g.pots.map((p) => p.plant).join(", ")})`).join(" · "));
 }
 
+// Run the seed and always close the database connection
 main()
   .catch((e) => {
     console.error(e);

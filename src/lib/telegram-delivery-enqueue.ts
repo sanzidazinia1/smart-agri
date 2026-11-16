@@ -1,6 +1,8 @@
+// Adds a Telegram alert to the send queue inside a database transaction
 import type { Prisma, TelegramDeliveryEventType } from "@prisma/client";
 import { isTelegramEventEnabled } from "@/lib/telegram-preferences";
 
+// The data for one queued Telegram message
 export type EnqueueTelegramDelivery = {
   userId: string;
   eventKey: string;
@@ -9,7 +11,7 @@ export type EnqueueTelegramDelivery = {
   messageText: string;
 };
 
-/** Adds an idempotent delivery record to an existing business transaction. */
+// Queues a message once (same eventKey is skipped) if that alert type is on
 export function enqueueTelegramDelivery(
   tx: Prisma.TransactionClient,
   delivery: EnqueueTelegramDelivery,

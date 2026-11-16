@@ -1,8 +1,6 @@
 "use client";
 
-// PAGE: Dashboard — the selected garden at a glance: health, live pots with
-// moisture trends, weather, what needs attention, recent activity and quick
-// actions. Garden choice is shared with the rest of the app (selected-garden).
+// Dashboard page: one garden at a glance — alerts, pots, weather and activity.
 import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import useSWR from "swr";
@@ -32,6 +30,7 @@ import { GardenPicker } from "@/components/GardenPicker";
 import { deviceStatus, timeAgo } from "@/components/device-ui";
 import { getSelectedGardenId, setSelectedGardenId } from "@/lib/selected-garden";
 
+// A garden in the garden picker.
 interface Garden {
   id: string;
   name: string;
@@ -39,6 +38,7 @@ interface Garden {
   type: string;
 }
 
+// A pot with its plant, sensors and recent moisture readings.
 interface Pot {
   id: string;
   label: string;
@@ -53,6 +53,7 @@ interface Pot {
   sensors: { id: string; name: string; status: string }[];
 }
 
+// Everything the dashboard API returns for one garden.
 interface DashboardData {
   garden: { id: string; name: string; location: string | null; type: string };
   weather: {
@@ -69,12 +70,15 @@ interface DashboardData {
   alerts: { id: string; severity: string; title: string; message: string }[];
 }
 
-/** A connected sensor reports every 5 s; a minute of silence means no live reading. */
+// Sensors send every 5 s; no reading for 60 s means "not live".
 const PROBE_SILENT_MS = 60_000;
 
+// The dashboard page: greeting, garden picker and the garden overview.
 export default function DashboardPage() {
+  // Load the user's gardens and profile (for the greeting name).
   const { data: gardens } = useSWR<Garden[]>("/api/gardens");
   const { data: profile } = useSWR<{ userName: string | null }>("/api/profile");
+  // Use the picked garden, else the saved one, else the first garden.
   const [chosen, setChosen] = useState<string | null>(null);
   const saved = getSelectedGardenId();
   const gardenId =
@@ -84,6 +88,7 @@ export default function DashboardPage() {
 
   if (!gardens) return <DashboardSkeleton />;
 
+  // No gardens yet: show a "create your first garden" card.
   if (!gardenId) {
     return (
       <div className="mx-auto max-w-7xl">
@@ -125,8 +130,9 @@ export default function DashboardPage() {
   );
 }
 
+// "Good morning, Name" heading.
 function Greeting({ name }: { name?: string }) {
-  // Re-checked every minute so a dashboard left open rolls over to the next greeting.
+  // Re-check every minute so the greeting changes if the page stays open.
   const hour = new Date(useNow(60_000)).getHours();
   const part = greetingFor(hour);
   return (
@@ -140,7 +146,7 @@ function Greeting({ name }: { name?: string }) {
   );
 }
 
-/** 5–11 morning, 12–16 afternoon, 17–20 evening, 21–4 night. */
+// Picks the greeting from the hour (morning, afternoon, evening, night).
 function greetingFor(hour: number) {
   if (hour >= 5 && hour < 12) return "Good morning";
   if (hour >= 12 && hour < 17) return "Good afternoon";
@@ -148,6 +154,7 @@ function greetingFor(hour: number) {
   return "Good night";
 }
 
+// Gives the current time and updates it every few seconds.
 function useNow(intervalMs = 15000) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -157,17 +164,21 @@ function useNow(intervalMs = 15000) {
   return now;
 }
 
+// The main dashboard content for one garden.
 function GardenOverview({ gardenId }: { gardenId: string }) {
+  // Load the garden's dashboard data every 3 seconds.
   const { data, error } = useSWR<DashboardData>(`/api/gardens/${gardenId}/dashboard`, { refreshInterval: 3000 });
   const now = useNow();
 
   if (error) return <Card className="py-10 text-center text-sm text-rose-600">Couldn&apos;t load this garden. It will retry automatically.</Card>;
   if (!data) return <DashboardSkeleton bare />;
 
+  // A pot's moisture, but only if the reading is recent (live).
   const live = (pot: Pot) =>
     pot.sensors.length > 0 && pot.moistureRecordedAt && now - new Date(pot.moistureRecordedAt).getTime() <= PROBE_SILENT_MS
       ? pot.currentMoisture
       : null;
+  // Numbers for the summary cards.
   const liveValues = data.pots.map(live).filter((value): value is number => value != null);
   const average = liveValues.length ? Math.round(liveValues.reduce((sum, value) => sum + value, 0) / liveValues.length) : null;
   const dry = data.pots.filter((pot) => {
@@ -176,12 +187,14 @@ function GardenOverview({ gardenId }: { gardenId: string }) {
   }).length;
   const online = data.devices.filter((device) => device.status === "ONLINE").length;
   const pumpsOn = data.pots.filter((pot) => pot.pumpState === "on").length;
+  // Finds a pot's name from its id (for the activity list).
   const potLabel = (potId: string | null) => data.pots.find((pot) => pot.id === potId)?.label ?? "Garden";
 
   return (
     <div className="space-y-6">
       <HealthBanner alerts={data.alerts} gardenId={gardenId} gardenName={data.garden.name} />
 
+      {/* Summary number cards */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Kpi icon={Gauge} label="Average soil moisture" value={average == null ? "--" : `${average}%`} hint={liveValues.length ? `${liveValues.length} live device${liveValues.length > 1 ? "s" : ""}` : "No live readings"} />
         <Kpi icon={Droplets} label="Pots needing water" value={String(dry)} hint={`of ${data.pots.length} ${data.pots.length === 1 ? "pot" : "pots"}`} tone={dry ? "amber" : undefined} />
@@ -190,6 +203,7 @@ function GardenOverview({ gardenId }: { gardenId: string }) {
       </div>
 
       <div className="grid items-start gap-6 xl:grid-cols-3">
+        {/* Pot tiles */}
         <section className="min-w-0 xl:col-span-2">
           <SectionHeader title="Pots" action={<Link href={`/gardens/${gardenId}?tab=pots`} className="text-sm font-semibold text-emerald-600 hover:underline dark:text-emerald-400">Manage pots →</Link>} />
           {data.pots.length === 0 ? (
@@ -209,12 +223,14 @@ function GardenOverview({ gardenId }: { gardenId: string }) {
           )}
         </section>
 
+        {/* Weather and quick actions */}
         <aside className="min-w-0 space-y-6">
           <WeatherCard data={data} />
           <QuickActions gardenId={gardenId} />
         </aside>
       </div>
 
+      {/* Recent watering and disease checks */}
       <section>
         <SectionHeader title="Recent activity" action={<Link href={`/gardens/${gardenId}?tab=activity`} className="text-sm font-semibold text-emerald-600 hover:underline dark:text-emerald-400">See all →</Link>} />
         <Card>
@@ -225,6 +241,7 @@ function GardenOverview({ gardenId }: { gardenId: string }) {
   );
 }
 
+// Green "all good" bar, or a list of alerts that need attention.
 function HealthBanner({ alerts, gardenId, gardenName }: { alerts: DashboardData["alerts"]; gardenId: string; gardenName: string }) {
   if (alerts.length === 0) {
     return (
@@ -264,6 +281,7 @@ function HealthBanner({ alerts, gardenId, gardenName }: { alerts: DashboardData[
   );
 }
 
+// Icon colours for the summary cards.
 const KPI_TONE: Record<string, string> = {
   amber: "bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400",
   rose: "bg-rose-50 text-rose-600 dark:bg-rose-500/10 dark:text-rose-400",
@@ -271,6 +289,7 @@ const KPI_TONE: Record<string, string> = {
   default: "bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400",
 };
 
+// One summary card: label, big number and a small hint.
 function Kpi({ icon: Icon, label, value, hint, tone }: { icon: LucideIcon; label: string; value: string; hint: string; tone?: string }) {
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
@@ -286,6 +305,7 @@ function Kpi({ icon: Icon, label, value, hint, tone }: { icon: LucideIcon; label
   );
 }
 
+// Section title with an optional link on the right.
 function SectionHeader({ title, action }: { title: string; action?: ReactNode }) {
   return (
     <div className="mb-3 flex items-baseline justify-between gap-3">
@@ -295,10 +315,12 @@ function SectionHeader({ title, action }: { title: string; action?: ReactNode })
   );
 }
 
+// One pot tile: moisture, status, trend line, device and pump.
 function PotTile({ pot, value, gardenId }: { pot: Pot; value: number | null; gardenId: string }) {
   const low = pot.moistureOnThreshold;
   const high = Math.max(pot.moistureOffThreshold, low);
   const noSensor = pot.sensors.length === 0;
+  // Status text and colour from the moisture vs. the target range.
   const state =
     noSensor
       ? { text: "No device", tone: "text-slate-400", stroke: "#94a3b8" }
@@ -361,7 +383,7 @@ function PotTile({ pot, value, gardenId }: { pot: Pot; value: number | null; gar
   );
 }
 
-/** Small trend line of recent moisture with the target band shaded. */
+// Small moisture trend line with the target range shaded.
 function Sparkline({ points, low, high, stroke }: { points: number[]; low: number; high: number; stroke: string }) {
   const width = 120;
   const height = 40;
@@ -380,6 +402,7 @@ function Sparkline({ points, low, high, stroke }: { points: number[]; low: numbe
   );
 }
 
+// Which icon to show for each weather description.
 const WEATHER_ICON: Record<string, LucideIcon> = {
   Clear: Sun,
   "Partly cloudy": CloudSun,
@@ -390,6 +413,7 @@ const WEATHER_ICON: Record<string, LucideIcon> = {
   Thunderstorm: CloudLightning,
 };
 
+// Current weather and a 3-day forecast for the garden's location.
 function WeatherCard({ data }: { data: DashboardData }) {
   const weather = data.weather;
   const location = data.garden.location || data.garden.name;
@@ -444,6 +468,7 @@ function WeatherCard({ data }: { data: DashboardData }) {
   );
 }
 
+// One small weather fact (rain, humidity, wind).
 function Fact({ icon: Icon, value, label }: { icon: LucideIcon; value: string; label: string }) {
   return (
     <div className="rounded-xl bg-white/70 px-2 py-2 dark:bg-slate-950/50">
@@ -454,6 +479,7 @@ function Fact({ icon: Icon, value, label }: { icon: LucideIcon; value: string; l
   );
 }
 
+// Shortcut buttons to common tasks.
 function QuickActions({ gardenId }: { gardenId: string }) {
   const actions: { href: string; icon: LucideIcon; title: string; text: string }[] = [
     { href: `/gardens/${gardenId}?tab=pots`, icon: Plus, title: "Add pot & plant", text: "Grow something new" },
@@ -481,7 +507,7 @@ function QuickActions({ gardenId }: { gardenId: string }) {
   );
 }
 
-/** "Tomato___Early_blight" -> "Early blight (Tomato)". */
+// Readable disease name: "Tomato___Early_blight" -> "Early blight (Tomato)".
 function prettyDisease(label: string) {
   const [crop, condition] = label.includes("___") ? label.split("___") : [null, label];
   const clean = (text: string) => text.replace(/_+/g, " ").replace(/\s+/g, " ").trim();
@@ -490,6 +516,7 @@ function prettyDisease(label: string) {
   return crop ? `${pretty} (${clean(crop)})` : pretty;
 }
 
+// Latest pump and disease events, newest first.
 function ActivityList({ data, potLabel }: { data: DashboardData; potLabel: (potId: string | null) => string }) {
   const items = [
     ...data.pumpHistory.slice(0, 8).map((event) => ({
@@ -530,6 +557,7 @@ function ActivityList({ data, potLabel }: { data: DashboardData; potLabel: (potI
   );
 }
 
+// Grey placeholder boxes shown while data loads.
 function DashboardSkeleton({ bare = false }: { bare?: boolean }) {
   return (
     <div className={bare ? "space-y-6" : "mx-auto max-w-7xl space-y-6"} aria-hidden="true">

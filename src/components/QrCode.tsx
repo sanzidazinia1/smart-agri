@@ -1,13 +1,14 @@
 "use client";
 
-// Renders text as a scannable QR code (SVG). Always dark-on-white, even in
-// dark mode, because phone cameras read that most reliably.
+// Draws text as a QR code; always dark-on-white so phone cameras can read it
 import { useEffect, useState } from "react";
 import QRCode from "qrcode";
 
+// QR code box; `value` is the text to encode, `label` is for screen readers
 export function QrCode({ value, size = 144, label }: { value: string; size?: number; label: string }) {
   const [svg, setSvg] = useState<string | null>(null);
 
+  // Build the QR SVG whenever the text changes (ignore it if unmounted first)
   useEffect(() => {
     let cancelled = false;
     QRCode.toString(value, { type: "svg", margin: 1, errorCorrectionLevel: "M", color: { dark: "#0f172a", light: "#ffffff" } })

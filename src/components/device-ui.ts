@@ -1,6 +1,6 @@
-// Shared display helpers for devices: status colours/labels, friendly type
-// names and relative times. Used by the Sensors page and garden details.
+// Shared device display helpers: status colours, type names and "time ago"
 
+// Colours and text used to show one device status
 export interface DeviceStatusStyle {
   dot: string;
   pill: string;
@@ -8,6 +8,7 @@ export interface DeviceStatusStyle {
   hint: string;
 }
 
+// Style for each known device status
 const DEVICE_STATUS: Record<string, DeviceStatusStyle> = {
   ONLINE: {
     dot: "bg-emerald-500",
@@ -29,6 +30,7 @@ const DEVICE_STATUS: Record<string, DeviceStatusStyle> = {
   },
 };
 
+// Fallback style for a device that has never reported
 const WAITING: DeviceStatusStyle = {
   dot: "bg-slate-400",
   pill: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
@@ -36,10 +38,12 @@ const WAITING: DeviceStatusStyle = {
   hint: "Hasn't sent its first reading yet",
 };
 
+// Get the display style for a device status string
 export function deviceStatus(status: string): DeviceStatusStyle {
   return DEVICE_STATUS[status] ?? WAITING;
 }
 
+// Friendly names for device type codes
 export const DEVICE_TYPE_LABELS: Record<string, string> = {
   esp32_node: "ESP32 device",
   soil_moisture: "Soil moisture sensor",
@@ -52,11 +56,11 @@ export const DEVICE_TYPE_LABELS: Record<string, string> = {
   camera: "Camera",
 };
 
+// Turn a timestamp into short text like "5 min ago"
 export function timeAgo(iso: string) {
   const seconds = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
   if (seconds < 10) return "just now";
-  // Under a minute show seconds — "1 min ago" for a 35 s gap made a board that
-  // had just gone quiet look stale while it still counted as online.
+  // Under a minute show seconds so a briefly quiet board doesn't look stale
   if (seconds < 60) return `${Math.floor(seconds / 10) * 10} s ago`;
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return `${minutes} min ago`;

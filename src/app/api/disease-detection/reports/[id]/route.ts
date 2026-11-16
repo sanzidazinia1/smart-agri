@@ -1,15 +1,16 @@
-// One past diagnosis, with the full report (symptoms, treatment) so it can be
-// reopened from history. The report row was written in the same transaction
-// as the prediction and shares its stored image reference.
+// API /api/disease-detection/reports/[id]: one past diagnosis with full report
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/api-auth";
 import { prisma } from "@/lib/db";
 
+// GET: return a diagnosis with symptoms and treatment so it can be reopened
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+  // Auth check: only logged-in users
   const gate = await requireUser();
   if (gate instanceof NextResponse) return gate;
   const { id } = await params;
 
+  // Ownership check: only this user's diagnosis
   const prediction = await prisma.diseasePrediction.findFirst({
     where: { id, userId: gate },
     select: {
@@ -28,6 +29,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   });
   if (!prediction) return NextResponse.json({ error: "Diagnosis not found" }, { status: 404 });
 
+  // The matching report row shares the same stored image
   const report = await prisma.diseaseReport.findFirst({
     where: { userId: gate, plantId: prediction.plantId, imageUrls: { has: prediction.imageRef } },
     select: {

@@ -1,5 +1,4 @@
-// Is Telegram set up, and what's in this user's delivery queue? Never returns
-// the bot token, chat ID or message text.
+// API /api/telegram/status: is Telegram set up, and how is the send queue doing
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/api-auth";
 import { prisma } from "@/lib/db";
@@ -7,13 +6,16 @@ import { EXPIRED_ERROR_CODE } from "@/lib/telegram-outbox";
 
 export const runtime = "nodejs";
 
+// GET: connection status and queue counts (never the token, chat ID or text)
 export async function GET() {
+  // Auth check: only logged-in users
   const gate = await requireUser();
   if (gate instanceof NextResponse) return gate;
   const { getTelegramConfig } = await import("@/lib/telegram");
   const settings = await prisma.telegramSettings.findUnique({ where: { userId: gate }, select: { botUsername: true, chatName: true, chatId: true, paused: true } });
   const paused = Boolean(settings?.paused);
 
+  // Count deliveries by status and find the last success and last error
   const [groups, expired, lastSent, lastFailure] = await Promise.all([
     prisma.telegramDelivery.groupBy({ by: ["status"], where: { userId: gate }, _count: true }),
     prisma.telegramDelivery.count({ where: { userId: gate, status: "FAILED", lastErrorCode: EXPIRED_ERROR_CODE } }),
@@ -27,8 +29,7 @@ export async function GET() {
   const count = (status: string) => groups.find((group) => group.status === status)?._count ?? 0;
 
   return NextResponse.json({
-    // Connected = this user's own bot with a chat, or the global .env bot.
-    // Disconnected (paused) = nothing is sent, even if a .env bot exists.
+    // Connected = own bot with a chat, or the .env bot; paused = nothing is sent
     configured: !paused && (Boolean(settings?.chatId) || getTelegramConfig() !== null),
     source: paused ? null : settings?.chatId ? "app" : getTelegramConfig() ? "env" : null,
     bot: settings ? { username: settings.botUsername, chatName: settings.chatName, chatConnected: Boolean(settings.chatId), paused } : null,

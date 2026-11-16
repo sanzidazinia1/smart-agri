@@ -1,8 +1,6 @@
 "use client";
 
-// One diagnosis, written for a home gardener: what it is, how sure the AI is,
-// what to do today, home remedies with recipes, then products and prevention.
-// Used for a fresh result and when reopening a scan from history.
+// Full disease report for one leaf scan: result, steps, home remedies, products
 import {
   AlertOctagon,
   Bug,
@@ -24,6 +22,7 @@ import { remedyPlanFor, type DiseaseKind, type HomeRemedy } from "@/lib/home-rem
 import { ImageLightbox } from "@/components/ImageLightbox";
 import { modelCropFor } from "@/lib/model-crops";
 
+// One diagnosis as returned by the API
 export interface Diagnosis {
   id: string;
   createdAt: string;
@@ -55,6 +54,7 @@ export interface Diagnosis {
   } | null;
 }
 
+// Label, icon and colours for each kind of problem
 const KIND: Record<DiseaseKind, { label: string; icon: LucideIcon; tone: string; panel: string }> = {
   healthy: {
     label: "Healthy",
@@ -103,28 +103,32 @@ function engineLabel(engine: string | null | undefined) {
   return name ? `${name}${model ? ` (${model.split("/").pop()})` : ""}` : null;
 }
 
+// Turn the AI confidence into "Very sure", "Fairly sure" or "Not sure"
 function confidenceLabel(confidence: number) {
   if (confidence >= 0.85) return { text: "Very sure", bar: "bg-emerald-500" };
   if (confidence >= 0.6) return { text: "Fairly sure", bar: "bg-amber-500" };
   return { text: "Not sure", bar: "bg-rose-500" };
 }
 
+// The report card shown after a scan and when reopening one from history
 export function DiagnosisReport({ report, demo = false, inPanel = false }: { report: Diagnosis; demo?: boolean; inPanel?: boolean }) {
+  // Remedy plan, confidence, AI engine and crop checks used below
   const plan = remedyPlanFor(report.className ?? report.disease);
   const kind = KIND[plan.kind];
   const percent = Math.round(report.confidence * 100);
   const details = report.details ?? null;
   const online = engineLabel(details?.engine);
   const unsure = details?.uncertain ?? report.confidence < 0.6;
-  // The AI's own "unsure" (close runner-up, photo doesn't look like the crop) wins over the %.
+  // The AI's own "unsure" flag beats the percentage
   const sure = unsure ? { text: "Not sure", bar: "bg-rose-500" } : confidenceLabel(report.confidence);
   const healthy = plan.kind === "healthy";
   const plantCrop = modelCropFor(report.plant.commonName);
-  // What the photo looked like to the model, before it was limited to the pot's crop.
+  // What the photo looked like to the model before it was limited to the crop
   const seenCrop = details?.lookedLike ?? (report.crop ? (modelCropFor(report.crop) ?? report.crop.toLowerCase()) : null);
   const doesntLookLikeCrop = Boolean(
     plantCrop && seenCrop && seenCrop !== plantCrop && (details?.cropMatch == null || details.cropMatch < 0.35),
   );
+  // Other likely diseases, and whether shop products are listed
   const alternatives = (details?.alternatives ?? []).filter((a) => a.confidence >= 0.05);
   const hasProducts = report.treatment.organic.length > 0 || report.treatment.chemical.length > 0;
 
@@ -169,6 +173,7 @@ export function DiagnosisReport({ report, demo = false, inPanel = false }: { rep
         </div>
       </div>
 
+      {/* Warning notes: fallback, demo, wrong plant, or unsure result */}
       {details?.fallbackReason ? (
         <Note tone="amber" icon={Info}>
           Your online AI couldn&apos;t answer ({details.fallbackReason}) — this result is from the local model instead.
@@ -204,6 +209,7 @@ export function DiagnosisReport({ report, demo = false, inPanel = false }: { rep
         </Note>
       ) : null}
 
+      {/* Summary and symptoms to look for */}
       <div className={`rounded-xl border p-4 text-sm ${kind.panel}`}>
         <p className="font-semibold">{details?.summary || plan.summary}</p>
         {report.symptoms.length > 0 ? (
@@ -218,6 +224,7 @@ export function DiagnosisReport({ report, demo = false, inPanel = false }: { rep
         ) : null}
       </div>
 
+      {/* Other possible diseases */}
       {alternatives.length ? (
         <div className="flex flex-wrap items-center gap-1.5 text-xs">
           <span className="font-semibold text-slate-500 dark:text-slate-400">Could also be:</span>
@@ -259,6 +266,7 @@ export function DiagnosisReport({ report, demo = false, inPanel = false }: { rep
         ) : null}
       </Section>
 
+      {/* Extra warning when a problem needs expert help */}
       {plan.escalate ? (
         <Note tone="rose" icon={AlertOctagon}>
           {plan.escalate}
@@ -296,6 +304,7 @@ export function DiagnosisReport({ report, demo = false, inPanel = false }: { rep
         </Section>
       ) : null}
 
+      {/* Disclaimer */}
       <p className="border-t border-slate-100 pt-3 text-[11px] text-slate-400 dark:border-slate-800">
         AI diagnosis from a photo — a guide, not a lab test. If the plant keeps getting worse, ask a local nursery or agriculture officer.
       </p>
@@ -303,6 +312,7 @@ export function DiagnosisReport({ report, demo = false, inPanel = false }: { rep
   );
 }
 
+// Expandable card for one home remedy: ingredients, steps and schedule
 function RemedyCard({ remedy, defaultOpen }: { remedy: HomeRemedy; defaultOpen: boolean }) {
   return (
     <details open={defaultOpen} className="group rounded-xl border border-slate-200 bg-slate-50/60 dark:border-slate-800 dark:bg-slate-950/40">
@@ -317,6 +327,7 @@ function RemedyCard({ remedy, defaultOpen }: { remedy: HomeRemedy; defaultOpen: 
         <ChevronDown size={16} className="mt-0.5 shrink-0 text-slate-400 transition group-open:rotate-180" />
       </summary>
       <div className="grid gap-4 border-t border-slate-200/70 px-4 py-3 text-sm dark:border-slate-800 sm:grid-cols-[minmax(0,12rem)_minmax(0,1fr)]">
+        {/* Ingredients */}
         <div>
           <p className="mb-1 text-[11px] font-bold uppercase tracking-wide text-slate-400">You need</p>
           <ul className="space-y-1">
@@ -328,6 +339,7 @@ function RemedyCard({ remedy, defaultOpen }: { remedy: HomeRemedy; defaultOpen: 
             ))}
           </ul>
         </div>
+        {/* Steps, schedule and caution */}
         <div>
           <p className="mb-1 text-[11px] font-bold uppercase tracking-wide text-slate-400">How to</p>
           <ol className="space-y-1">
@@ -349,6 +361,7 @@ function RemedyCard({ remedy, defaultOpen }: { remedy: HomeRemedy; defaultOpen: 
   );
 }
 
+// Report section with an icon and title
 function Section({ icon: Icon, title, hint, children }: { icon: LucideIcon; title: string; hint?: string; children: React.ReactNode }) {
   return (
     <section>
@@ -362,6 +375,7 @@ function Section({ icon: Icon, title, hint, children }: { icon: LucideIcon; titl
   );
 }
 
+// Titled bullet list (used for products)
 function BulletList({ title, items }: { title: string; items: string[] }) {
   return (
     <div>
@@ -375,6 +389,7 @@ function BulletList({ title, items }: { title: string; items: string[] }) {
   );
 }
 
+// Coloured warning box with an icon
 function Note({ tone, icon: Icon, children }: { tone: "amber" | "rose"; icon: LucideIcon; children: React.ReactNode }) {
   const cls =
     tone === "amber"

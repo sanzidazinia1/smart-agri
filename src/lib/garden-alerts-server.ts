@@ -1,19 +1,17 @@
-// Alerts for every garden a user has, in a handful of batched queries (no
-// per-garden round trips), for the Gardens list cards. Uses the same rules as
-// a garden's details page (buildGardenAlerts) and hides alerts the user has
-// marked resolved. Weather isn't fetched here, so the info-only "rain
-// expected" alert appears on the details page only.
+// Builds open alerts for all of a user's gardens at once (for the Gardens list)
 import { prisma } from "@/lib/db";
 import { getDeviceConnectionStatus } from "@/lib/device-status";
 import { applyAlertResolutions, buildGardenAlerts, type GardenAlert } from "@/lib/garden-alerts";
 
+// Returns each garden's unresolved alerts (no weather alerts here)
 export async function getAlertsByGarden(userId: string): Promise<Map<string, GardenAlert[]>> {
+  // Load everything needed in a few queries, all at the same time
   const [pots, latestMoisture, devices, predictions, failedCommands, resolutions] = await Promise.all([
     prisma.pot.findMany({
       where: { userId },
       select: { id: true, label: true, gardenId: true, moistureOnThreshold: true, plant: { select: { id: true, commonName: true } } },
     }),
-    // Latest soil reading per pot.
+    // Latest soil reading per pot
     prisma.$queryRaw<{ potId: string; value: number }[]>`
       SELECT DISTINCT ON ("potId") "potId", "value"::float AS value
       FROM "Reading"
@@ -37,6 +35,7 @@ export async function getAlertsByGarden(userId: string): Promise<Map<string, Gar
 
   const moistureByPot = new Map(latestMoisture.map((row) => [row.potId, Math.round(row.value * 10) / 10]));
   const now = new Date();
+  // Groups a list by a key such as gardenId
   const group = <T,>(items: T[], key: (item: T) => string | null) => {
     const map = new Map<string, T[]>();
     for (const item of items) {
@@ -50,11 +49,12 @@ export async function getAlertsByGarden(userId: string): Promise<Map<string, Gar
   const devicesByGarden = group(devices, (device) => device.gardenId);
   const failedByGarden = group(failedCommands, (command) => command.gardenId);
   const resolutionsByGarden = group(resolutions, (resolution) => resolution.gardenId);
-  // Newest prediction per pot only (an older diagnosis is superseded).
+  // Keep only the newest diagnosis per pot
   const seenPots = new Set<string>();
   const latestPredictions = predictions.filter((prediction) => !seenPots.has(prediction.potId) && seenPots.add(prediction.potId));
   const predictionsByGarden = group(latestPredictions, (prediction) => prediction.gardenId);
 
+  // Build alerts for each garden, then hide the resolved ones
   const gardenIds = new Set([...potsByGarden.keys(), ...devicesByGarden.keys(), ...failedByGarden.keys(), ...predictionsByGarden.keys()]);
   const result = new Map<string, GardenAlert[]>();
   for (const gardenId of gardenIds) {

@@ -1,3 +1,4 @@
+// API /api/profile: view and update the logged-in user's account
 import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
@@ -5,7 +6,9 @@ import { requireUser } from "@/lib/api-auth";
 import { prisma } from "@/lib/db";
 import { hashPassword, verifyPassword } from "@/lib/password";
 
+// GET: return email, name, join date and counts (never the password hash)
 export async function GET() {
+  // Auth check: only logged-in users
   const gate = await requireUser();
   if (gate instanceof NextResponse) return gate;
 
@@ -21,6 +24,7 @@ export async function GET() {
   return NextResponse.json(user);
 }
 
+// Validation schema: name, email and/or password change (needs both passwords)
 const schema = z
   .object({
     userName: z.string().trim().min(1).max(100).optional(),
@@ -38,6 +42,7 @@ const schema = z
     { message: "Provide at least one account change." },
   );
 
+// PATCH: change name, email or password
 export async function PATCH(req: Request) {
   const gate = await requireUser();
   if (gate instanceof NextResponse) return gate;
@@ -63,6 +68,7 @@ export async function PATCH(req: Request) {
   });
   if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
+  // Security: a password change needs the correct current password
   if (
     parsed.data.currentPassword &&
     !verifyPassword(parsed.data.currentPassword, user.passwordHash, user.passwordSalt)
@@ -78,6 +84,7 @@ export async function PATCH(req: Request) {
     : undefined;
 
   try {
+    // DB write: save only the fields that were sent
     const updated = await prisma.user.update({
       where: { id: gate },
       data: {
@@ -91,6 +98,7 @@ export async function PATCH(req: Request) {
     });
     return NextResponse.json({ success: true, user: updated });
   } catch (error) {
+    // P2002 = the new email is already used by another account
     if (
       error instanceof Prisma.PrismaClientKnownRequestError &&
       error.code === "P2002"

@@ -1,10 +1,11 @@
+// API /api/telegram/deliveries: history of Telegram messages sent to the user
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/api-auth";
 import { prisma } from "@/lib/db";
 
-// Delivery history is intentionally separate from the in-app notification feed.
-// Do not return destinationRef or messageText: both are server-side delivery data.
+// GET: last 50 deliveries; security: never return chat ref or message text
 export async function GET() {
+  // Auth check: only logged-in users
   const gate = await requireUser();
   if (gate instanceof NextResponse) return gate;
 

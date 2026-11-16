@@ -1,6 +1,4 @@
-// TASK: Connect (POST) or disconnect (DELETE) a device and a pot. The pot goes
-// on one of the board's ports — the one asked for, or the first free one
-// (see lib/device-pot). One sensor per pot; one pot per port.
+// API /api/pots/[id]/devices: connect or disconnect a device and a pot
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireUser } from "@/lib/api-auth";
@@ -8,8 +6,10 @@ import { prisma } from "@/lib/db";
 import { otherDeviceOnPot } from "@/lib/device-claim";
 import { MAX_PORTS, firstFreePort, supportsRemotePorts } from "@/lib/device-pot";
 
+// Validation schema: which device, and optionally which port
 const schema = z.object({ deviceId: z.string().trim().min(1), port: z.number().int().min(1).max(MAX_PORTS).optional() });
 
+// Shared check: logged in, user owns pot and device, same garden
 async function resolve(req: Request, params: Promise<{ id: string }>) {
   const gate = await requireUser();
   if (gate instanceof NextResponse) return gate;
@@ -32,6 +32,7 @@ async function resolve(req: Request, params: Promise<{ id: string }>) {
   return { potId: pot.id, deviceId: device.id, deviceName: device.name, portCount: device.portCount, canGrow: supportsRemotePorts(device.firmwareVersion), port: parsed.data.port, gardenId: pot.gardenId, unassigned: !device.gardenId };
 }
 
+// POST: connect the pot to a free port (one device per pot, one pot per port)
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const target = await resolve(req, params);
   if (target instanceof NextResponse) return target;
@@ -47,7 +48,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (already) return NextResponse.json({ connected: true, port: already.port });
 
   let port: number | null;
-  // A port beyond the board's current count adds it (firmware 2.9+ picks it up on its next poll).
+  // A port above the board's count adds a port (firmware 2.9+).
   let growTo: number | null = null;
   if (target.port) {
     if (target.port > target.portCount) {
@@ -68,6 +69,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     }
   }
 
+  // DB write: update the device if needed and create the link together
   await prisma.$transaction(async (tx) => {
     // A device without a garden joins the pot's garden; a new port grows the board.
     if (target.unassigned || growTo) {
@@ -81,6 +83,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   return NextResponse.json({ connected: true, port });
 }
 
+// DELETE: disconnect the device from this pot
 export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const target = await resolve(req, params);
   if (target instanceof NextResponse) return target;

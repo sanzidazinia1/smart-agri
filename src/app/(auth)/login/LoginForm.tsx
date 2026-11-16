@@ -1,4 +1,5 @@
 "use client";
+// Login form: checks email + password and opens the dashboard on success.
 
 import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
@@ -6,6 +7,7 @@ import { useState } from "react";
 import { KeyRound, Mail } from "lucide-react";
 import { AuthError, AuthField, AuthSubmit } from "@/components/AuthFields";
 
+// The email/password form shown on the login page.
 export function LoginForm() {
   const router = useRouter();
   const [email, setEmail] = useState("");
@@ -13,6 +15,7 @@ export function LoginForm() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
+  // Sends the details to NextAuth; shows an error if they are wrong.
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");

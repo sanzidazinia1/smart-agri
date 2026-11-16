@@ -1,7 +1,9 @@
 "use client";
 
+// Small shared UI pieces: page header, card, icon button and badge
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 
+// Page title with optional subtitle and an action button on the right
 export function PageHeader({
   title,
   subtitle,
@@ -28,6 +30,7 @@ export function PageHeader({
   );
 }
 
+// White rounded box used to group content
 export function Card({
   children,
   className = "",
@@ -44,6 +47,7 @@ export function Card({
   );
 }
 
+// Square button that only shows an icon (needs an aria-label)
 export function IconButton({
   className = "",
   type = "button",
@@ -61,6 +65,7 @@ export function IconButton({
   );
 }
 
+// Colour classes for each badge tone
 const TONES: Record<string, string> = {
   emerald: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300",
   rose: "bg-rose-50 text-rose-700 dark:bg-rose-950 dark:text-rose-300",
@@ -70,6 +75,7 @@ const TONES: Record<string, string> = {
   slate: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300",
 };
 
+// Small rounded label, e.g. a status tag
 export function Badge({
   children,
   tone = "slate",
@@ -86,6 +92,7 @@ export function Badge({
   );
 }
 
+// Pick a badge colour for an alert severity level
 export function severityTone(
   severity: string,
 ): keyof typeof TONES {

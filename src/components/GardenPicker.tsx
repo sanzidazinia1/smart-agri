@@ -1,14 +1,15 @@
 "use client";
 
-// Searchable garden switcher: one button that opens a filterable, scrolling
-// list, so it stays usable whether the user has 3 gardens or 1,000.
+// Button that opens a searchable list to switch between gardens
 import { useCallback, useId, useRef, useState } from "react";
 import { ChevronDown, Trees } from "lucide-react";
 import { useDismiss } from "@/components/HeaderMenus";
 import { GardenSearchList, type PickerGarden } from "@/components/GardenSearchList";
 
+// Re-export the garden type so callers can import it from here
 export type { PickerGarden };
 
+// Garden dropdown; `value` is the selected garden id (or "all")
 export function GardenPicker({
   gardens,
   value,
@@ -25,6 +26,7 @@ export function GardenPicker({
   allLabel?: string;
   className?: string;
 }) {
+  // Open state, refs and close-on-outside-click handling
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -32,9 +34,10 @@ export function GardenPicker({
   const close = useCallback(() => setOpen(false), []);
   useDismiss(open, close, rootRef, triggerRef);
 
+  // The garden shown on the button (or the "all gardens" choice)
   const selected = value === "all" && allLabel ? { id: "all", name: allLabel, location: `${gardens.length} gardens` } : gardens.find((garden) => garden.id === value);
 
-  // Return focus to the trigger after picking, for keyboard users.
+  // Pick a garden, close the list and return focus to the button
   function choose(garden: PickerGarden) {
     onChange(garden.id);
     close();
@@ -44,6 +47,7 @@ export function GardenPicker({
   return (
     <div ref={rootRef} className={`relative ${className}`}>
       {label ? <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-400">{label}</span> : null}
+      {/* Button showing the current garden */}
       <button
         ref={triggerRef}
         id={triggerId}
@@ -65,6 +69,7 @@ export function GardenPicker({
         <ChevronDown size={16} className={`shrink-0 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
 
+      {/* Dropdown with the searchable garden list */}
       {open ? (
         <div className="animate-fade-in absolute left-0 right-0 top-full z-30 mt-1.5 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl shadow-slate-950/10 dark:border-slate-800 dark:bg-slate-900 dark:shadow-black/40">
           <GardenSearchList gardens={gardens} selectedId={value} allLabel={allLabel} onChoose={choose} />

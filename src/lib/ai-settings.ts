@@ -1,15 +1,15 @@
-// A user's Disease AI choice: the local model, Google Gemini or Groq. Keys are
-// sealed in the database (lib/secret-box) and only opened server-side.
+// Saves/loads each user's Disease AI choice; API keys stay encrypted
 import type { AiProvider } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { openSecret, sealSecret } from "@/lib/secret-box";
 import { PROVIDER_INFO, type OnlineProvider } from "@/lib/ai-vision";
 
+// Which AI engine runs a diagnosis, plus its key and model when online
 export type DiseaseEngine =
   | { provider: "LOCAL" }
   | { provider: OnlineProvider; apiKey: string; model: string; fallbackToLocal: boolean };
 
-/** What the diagnosis should run on for this user (keys opened). */
+// Picks the AI engine for this user and decrypts its key (server only)
 export async function getDiseaseEngine(userId: string): Promise<DiseaseEngine> {
   const row = await prisma.aiSettings.findUnique({ where: { userId } });
   if (!row || row.provider === "LOCAL") return { provider: "LOCAL" };
@@ -21,13 +21,14 @@ export async function getDiseaseEngine(userId: string): Promise<DiseaseEngine> {
   return { provider: row.provider, apiKey, model, fallbackToLocal: row.fallbackToLocal };
 }
 
+// Hides a saved key, showing only its last 4 characters
 const mask = (sealed: string | null) => {
   if (!sealed) return null;
   const key = openSecret(sealed);
   return key ? `••••${key.slice(-4)}` : "saved (can't be read — enter it again)";
 };
 
-/** Safe to send to the browser: no keys, only whether one is saved. */
+// Settings safe to send to the browser: no real keys, only masked ones
 export async function getAiSettingsView(userId: string) {
   const row = await prisma.aiSettings.findUnique({ where: { userId } });
   return {
@@ -38,11 +39,12 @@ export async function getAiSettingsView(userId: string) {
   };
 }
 
+// Encrypts an API key before it is saved in the database
 export function sealKey(key: string) {
   return sealSecret(key.trim());
 }
 
-/** The saved key for a provider (for "Test"), or null. */
+// Returns the user's saved key for a provider (used by "Test"), or null
 export async function savedKey(userId: string, provider: OnlineProvider) {
   const row = await prisma.aiSettings.findUnique({ where: { userId } });
   const sealed = provider === "GEMINI" ? row?.geminiKeySealed : row?.groqKeySealed;

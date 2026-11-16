@@ -1,21 +1,20 @@
-// SmartAgriAI — unified PostgreSQL schema (Prisma)
-// Collapses smartagriai-main's normalized + legacy models into one schema.
+// Database schema: every table (model) and list of allowed values (enum) in SmartAgri.
 
+// Generate the Prisma JavaScript client
 generator client {
   provider = "prisma-client-js"
 }
 
+// PostgreSQL connection settings
 datasource db {
   provider  = "postgresql"
-  // App queries. On Supabase: the pooled connection (port 6543, ?pgbouncer=true).
+  // Used by the app (on Supabase: the pooled connection, port 6543)
   url       = env("DATABASE_URL")
-  // Migrations. On Supabase: the direct connection (port 5432). Locally: same as DATABASE_URL.
+  // Used for migrations (on Supabase: the direct connection, port 5432)
   directUrl = env("DIRECT_URL")
 }
 
-// ---------------------------------------------------------------------------
-// Enums
-// ---------------------------------------------------------------------------
+// ---- Enums (fixed lists of allowed values) ----
 
 enum GardenType {
   outdoor
@@ -69,12 +68,14 @@ enum DeviceType {
   camera
 }
 
+// Whether a board has been heard from recently
 enum DeviceStatus {
   NEVER_SEEN
   ONLINE
   OFFLINE
 }
 
+// Kinds of sensor reading
 enum Metric {
   soil_moisture
   temperature
@@ -111,11 +112,13 @@ enum IrrigationStatus {
   off
 }
 
+// AUTO = waters by soil moisture, MANUAL = only when the user says
 enum PotIrrigationMode {
   AUTO
   MANUAL
 }
 
+// Remote actions the app can send to a board
 enum DeviceAction {
   RESTART
   RESET_WIFI
@@ -123,11 +126,13 @@ enum DeviceAction {
   FACTORY_RESET
 }
 
+// Pump commands sent to a board
 enum DeviceCommandType {
   PUMP_ON
   PUMP_OFF
 }
 
+// Life of a pump command, from waiting to done or failed
 enum DeviceCommandStatus {
   PENDING
   SENT
@@ -157,6 +162,7 @@ enum TelegramDeliveryStatus {
   FAILED
 }
 
+// Events that trigger a Telegram message
 enum TelegramDeliveryEventType {
   PUMP_ACKNOWLEDGED
   PUMP_FAILED
@@ -178,16 +184,15 @@ enum TaskStatus {
   skipped
 }
 
-// ---------------------------------------------------------------------------
-// Models
-// ---------------------------------------------------------------------------
+// ---- Models (database tables) ----
 
+// A person with a login; owns everything else
 model User {
   id               String   @id @default(cuid())
   email            String   @unique
   passwordHash     String
   passwordSalt     String
-  refreshTokenHash String?
+  refreshTokenHash String? // not used by the current login
   userName         String?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
@@ -211,6 +216,7 @@ model User {
   alertResolutions   AlertResolution[]
 }
 
+// A garden (e.g. rooftop or balcony) that holds pots and devices
 model Garden {
   id        String         @id @default(cuid())
   userId    String
@@ -240,26 +246,22 @@ model Garden {
   @@index([userId, status])
 }
 
-// A board that has announced itself but isn't claimed yet (or is waiting to
-// collect its key after a claim). The board proves it is the same board with
-// a random secret (stored hashed); the user proves physical access with the
-// short pairing code the board prints. See lib/device-pairing.
+// A new board waiting to be added to an account (see lib/device-pairing)
 model DevicePairing {
   id                 String    @id @default(cuid())
   hardwareId         String    @unique
-  secretHash         String
-  pairingCode        String
+  secretHash         String // hashed secret that proves it's the same board
+  pairingCode        String // 6-digit code shown by the board
   firmware           String?
   failedAttempts     Int       @default(0)
   lastSeenAt         DateTime  @default(now())
   claimedAt          DateTime?
   claimedByUserId    String?
   deviceId           String?
-  // Plaintext key held only until the board collects it (then cleared).
+  // Device key kept only until the board collects it (then cleared)
   pendingKey         String?
   keyExpiresAt       DateTime?
-  // Button claim: the app asked the user to press BOOT on the board. The
-  // board confirms within the window and the claim is completed with these.
+  // Set while the app waits for the user to press BOOT on the board
   confirmRequestedAt DateTime?
   requestUserId      String?
   requestGardenId    String?
@@ -270,9 +272,7 @@ model DevicePairing {
   @@index([claimedAt, lastSeenAt])
 }
 
-// A user's "mark resolved" on a computed garden alert (see lib/garden-alerts).
-// Rows are removed automatically once the alert's condition clears, so the
-// same problem alerts again if it comes back.
+// A garden alert the user marked resolved (removed once the problem clears)
 model AlertResolution {
   id         String   @id @default(cuid())
   userId     String
@@ -287,11 +287,12 @@ model AlertResolution {
   @@index([userId])
 }
 
+// One pot in a garden, with its watering settings and pump state
 model Pot {
   id                       String            @id @default(cuid())
   userId                   String
   gardenId                 String
-  /// Serial number per user (POT-1, POT-2, …), assigned by the server on create.
+  // Pot number per user (POT-1, POT-2, ...), set by the server
   number                   Int
   label                    String
   sizeCm                   Float?
@@ -299,11 +300,11 @@ model Pot {
   position                 String?
   status                   ResourceStatus    @default(active)
   irrigationMode           PotIrrigationMode @default(AUTO)
-  moistureOnThreshold      Float             @default(30)
-  moistureOffThreshold     Float             @default(50)
+  moistureOnThreshold      Float             @default(30) // pump ON below this %
+  moistureOffThreshold     Float             @default(50) // pump OFF above this %
   pumpState                IrrigationStatus  @default(off)
-  commandSequence          Int               @default(0)
-  confirmedCommandSequence Int               @default(0)
+  commandSequence          Int               @default(0) // number of the last command sent
+  confirmedCommandSequence Int               @default(0) // last one the board confirmed
   createdAt                DateTime          @default(now())
   updatedAt                DateTime          @updatedAt
 
@@ -322,6 +323,7 @@ model Pot {
   @@index([userId, gardenId, status])
 }
 
+// The plant growing in a pot (one plant per pot)
 model Plant {
   id                String       @id @default(cuid())
   userId            String
@@ -351,10 +353,11 @@ model Plant {
   @@index([userId, gardenId, potId])
 }
 
+// An ESP32 board added to a user's account
 model Device {
   id              String        @id @default(cuid())
   userId          String
-  // Optional: a board can be added first and placed in a garden later.
+  // Optional: a board can be placed in a garden later
   gardenId        String?
   hardwareId      String        @unique
   name            String
@@ -365,18 +368,14 @@ model Device {
   firmwareVersion String?
   status          DeviceStatus  @default(NEVER_SEEN)
   lastSeenAt      DateTime?
-  /// A remote action waiting for the board (restart, Wi-Fi reset, sleep,
-  /// factory reset). The board picks it up on its next poll and confirms.
+  // Remote action waiting for the board's next poll
   pendingAction   DeviceAction?
   pendingActionAt DateTime?
-  /// How many pots this board can serve (soil probe + pump per port), as
-  /// reported by its firmware. 1 for a classic single-pot board.
+  // Number of ports (probe + pump) the board reports
   portCount       Int           @default(1)
-  /// Port count chosen in the app (null = whatever the board reports). Sent to
-  /// the board on its command poll; firmware 2.9+ applies it without re-flashing.
+  // Port count chosen in the app (null = use the board's own)
   desiredPorts    Int?
-  /// What each port reported last: [{ port, moisture (null = probe not reading), pump }].
-  /// Kept even for ports with no pot, so the Devices page shows what's wired.
+  // Last report per port: [{ port, moisture, pump }]
   portStatus      Json?
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
@@ -391,6 +390,7 @@ model Device {
   @@index([userId, gardenId, status])
 }
 
+// A pump ON/OFF command for a board, tracked until it's confirmed
 model DeviceCommand {
   id                     String              @id @default(cuid())
   userId                 String
@@ -411,8 +411,8 @@ model DeviceCommand {
   lastAttemptAt          DateTime?
   nextAttemptAt          DateTime            @default(now())
   expiresAt              DateTime
-  sequence               Int                 @default(0)
-  decisionMoisture       Float?
+  sequence               Int                 @default(0) // order number per pot (old ones are ignored)
+  decisionMoisture       Float? // moisture % when the decision was made
   onThreshold            Float?
   offThreshold           Float?
   pumpEvents             PumpEvent[]
@@ -426,11 +426,12 @@ model DeviceCommand {
   @@index([userId, potId, createdAt])
 }
 
+// Links a board's port to the pot it measures and waters
 model DevicePotMapping {
   id            String   @id @default(cuid())
   deviceId      String
   potId         String
-  /// Which of the board's ports (1–6) measures and waters this pot.
+  // Which port (1-6) on the board serves this pot
   port          Int      @default(1)
   sensorChannel String?
   createdAt     DateTime @default(now())
@@ -444,6 +445,7 @@ model DevicePotMapping {
   @@index([potId])
 }
 
+// Saved weather for a garden at one moment
 model WeatherSnapshot {
   id              String   @id @default(cuid())
   gardenId        String
@@ -463,6 +465,7 @@ model WeatherSnapshot {
   @@index([gardenId, observedAt])
 }
 
+// History of pump changes (on/off) for each pot
 model PumpEvent {
   id            String              @id @default(cuid())
   userId        String
@@ -487,6 +490,7 @@ model PumpEvent {
   @@index([gardenId, occurredAt])
 }
 
+// One sensor value (e.g. soil moisture) at one time
 model Reading {
   id         String   @id @default(cuid())
   userId     String
@@ -510,6 +514,7 @@ model Reading {
   @@index([userId, metric, recordedAt])
 }
 
+// A disease found on a plant, with symptoms and treatment advice
 model DiseaseReport {
   id                      String        @id @default(cuid())
   userId                  String
@@ -538,8 +543,7 @@ model DiseaseReport {
   @@index([plantId, detectedAt])
 }
 
-// Immutable AI prediction history. The hierarchy is stored explicitly so a
-// prediction can always be queried by its garden, pot, or plant.
+// Saved AI result for one leaf photo (never changed after saving)
 model DiseasePrediction {
   id               String   @id @default(cuid())
   userId           String
@@ -551,8 +555,7 @@ model DiseasePrediction {
   predictedDisease String
   className        String?
   confidence       Float
-  /// Extra AI detail: alternatives, unsure flag, crop the answer was limited to,
-  /// what the photo looked like. Shown when the scan is reopened.
+  // Extra AI detail (alternatives, unsure flag, ...) shown when reopened
   details          Json?
   createdAt        DateTime @default(now())
 
@@ -565,6 +568,7 @@ model DiseasePrediction {
   @@index([userId, gardenId, potId, createdAt])
 }
 
+// A record of one watering decision or run
 model IrrigationEvent {
   id              String           @id @default(cuid())
   userId          String
@@ -592,7 +596,7 @@ model IrrigationEvent {
   @@index([gardenId, startedAt])
 }
 
-// Replaces the embedded user.irrigation object from the legacy model.
+// A user's overall watering settings
 model IrrigationConfig {
   id               String           @id @default(cuid())
   userId           String           @unique
@@ -604,7 +608,7 @@ model IrrigationConfig {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
-// Per-plant ideal ranges (from SmartGarden concept) — drives recommendations + auto-irrigation.
+// Ideal ranges for a plant; used for advice and auto-watering
 model PlantThreshold {
   id              String @id @default(cuid())
   plantId         String @unique
@@ -622,6 +626,7 @@ model PlantThreshold {
   plant Plant @relation(fields: [plantId], references: [id], onDelete: Cascade)
 }
 
+// A timed watering plan (start time, length, days)
 model Schedule {
   id              String   @id @default(cuid())
   userId          String
@@ -638,6 +643,7 @@ model Schedule {
   @@index([userId])
 }
 
+// An in-app message for the user (read/unread)
 model Notification {
   id        String             @id @default(cuid())
   userId    String
@@ -658,16 +664,15 @@ model Notification {
   @@index([userId, status, createdAt])
 }
 
-// Durable server-side outbox and delivery history. This is intentionally
-// separate from Notification, which is the in-app read/unread feed.
+// A Telegram message waiting to be sent, or already sent (outbox)
 model TelegramDelivery {
   id                String                    @id @default(cuid())
   userId            String
-  eventKey          String                    @unique
+  eventKey          String                    @unique // stops the same event being sent twice
   eventType         TelegramDeliveryEventType
   eventRef          String
   channel           String                    @default("telegram")
-  // A non-secret configuration label only. The configured chat ID is never persisted.
+  // Just a label; the real chat ID is never saved here
   destinationRef    String                    @default("configured-default")
   messageText       String
   status            TelegramDeliveryStatus    @default(PENDING)
@@ -676,7 +681,7 @@ model TelegramDelivery {
   lastErrorCode     String?
   providerMessageId String?
   lastAttemptAt     DateTime?
-  leaseExpiresAt    DateTime?
+  leaseExpiresAt    DateTime? // a worker is sending it until this time
   createdAt         DateTime                  @default(now())
   updatedAt         DateTime                  @updatedAt
   sentAt            DateTime?
@@ -688,6 +693,7 @@ model TelegramDelivery {
   @@index([userId, createdAt])
 }
 
+// A garden task for a plant (water, fertilise, inspect, ...)
 model Task {
   id        String     @id @default(cuid())
   plantId   String
@@ -702,9 +708,7 @@ model Task {
   @@index([plantId, status])
 }
 
-// Per-user Telegram connection, set up from Settings. The bot token is stored
-// encrypted (AES-256-GCM, key derived from AUTH_SECRET) and never sent to the
-// browser. Falls back to TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID in .env.
+// A user's Telegram bot setup; the bot token is stored encrypted
 model TelegramSettings {
   id             String   @id @default(cuid())
   userId         String   @unique
@@ -712,8 +716,7 @@ model TelegramSettings {
   botUsername    String
   chatId         String?
   chatName       String?
-  /// Disconnected in Settings: no alerts are sent, but the bot stays saved
-  /// so it can be reconnected without pasting the token again.
+  // Paused: no alerts sent, but the bot stays saved for later
   paused         Boolean  @default(false)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -721,14 +724,14 @@ model TelegramSettings {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
+// Which AI checks leaf photos
 enum AiProvider {
   LOCAL
   GEMINI
   GROQ
 }
 
-/// Which AI diagnoses leaf photos for this user. API keys are sealed with
-/// lib/secret-box (AES-256-GCM, key from AUTH_SECRET) — never stored in plain text.
+// A user's AI choice; API keys are stored encrypted, never in plain text
 model AiSettings {
   userId          String     @id
   provider        AiProvider @default(LOCAL)
@@ -736,7 +739,7 @@ model AiSettings {
   geminiModel     String?
   groqKeySealed   String?
   groqModel       String?
-  /// If the online AI fails (quota, network), use the local model instead.
+  // If the online AI fails, use the local model instead
   fallbackToLocal Boolean    @default(true)
   updatedAt       DateTime   @updatedAt
 
